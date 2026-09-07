@@ -233,10 +233,10 @@ def main():
 
     local = ""
     err_text = "\n".join(f"- {s}" for s, _ in counts.most_common(MAX_SNIPPETS))
-    groups = ask(err_text, CLUSTER_INSTRUCTIONS, 250)
+    groups = ask(err_text, CLUSTER_INSTRUCTIONS, 250, tier="quality")
     if groups:
-        draft = ask(groups, LESSON_INSTRUCTIONS, 150) or ""
-        local = ("Local draft from the on-device model (zero tokens; verify before saving, "
+        draft = ask(groups, LESSON_INSTRUCTIONS, 150, tier="quality") or ""
+        local = ("Local draft from the local model (zero tokens; verify before saving, "
                  "it does not know the repo):\n" + groups + ("\n" + draft if draft else "") + "\n")
 
     reason = (

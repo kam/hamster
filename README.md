@@ -25,6 +25,7 @@ The premise: a lesson that lives as prose gets forgotten. A lesson that lives as
 | `/hamster:promote <lesson>` | command | Drafts a rule + tests from a memory, Navigator node or text; installs only when green |
 | `/hamster:rules` | command | Fire counts, untested rules, prune candidates (deletion needs your click) |
 | `/hamster:test` | command | Keep-tests for every rule + hook scenario tests |
+| `/hamster:lm` | command | Point the local-model slot at your server; pick fast + quality models |
 | `rules/default/` | bundled | `rm -rf` on root/home, `chmod 777`, force-push to protected branches |
 
 State lives in `~/.claude/hamster/`. Project rules live in `<repo>/.claude/hamster/rules/` and are meant to be committed.
@@ -61,13 +62,19 @@ Optional `when` gate, checked before the pattern (all keys AND-ed):
 
 When the [`navigator`](https://github.com/kam/navigator) CLI is on `PATH`, hamster reads and writes cross-project lessons as `solutions` nodes and session records as `sessions` nodes: the retro lists matching solutions as "already recorded", `/handoff done` files a session node, `/hamster:promote` back-links the node with `promoted_to`, and session start shows this repo's earlier lessons. Without it everything falls back to Claude Code auto-memory. Nothing writes the vault markdown directly.
 
-## On-device model (macOS 26+)
+## Local model (any server, or Apple on-device)
+
+hamster drafts the cheap steps at zero API tokens: the retro's error grouping and lesson draft, the pre-compaction session summary, the "worth remembering?" verdict, and `hamster-lm-ask session|cluster|lesson|nudge|save-session` for skills and other plugins. Order: **your server → Apple on-device (macOS 26+) → the in-session model.**
 
 ```bash
-scripts/build-native.sh     # compiles native/hamster-lm with the FoundationModels SDK
+/hamster:lm                 # probes oMLX :8000, LM Studio :1234, Ollama :11434, llama.cpp :8080; pick a fast + quality model
+python3 scripts/lm.py set --url http://127.0.0.1:1234/v1 --fast <id> --quality <id>   # or by hand; any OpenAI-compatible server
+scripts/build-native.sh     # optional: compiles native/hamster-lm (Apple Foundation Models) as the zero-setup fallback
 ```
 
-With the binary present, hamster uses Apple's on-device model for the cheap steps, at zero API tokens: the retro's error grouping and lesson first draft, a session summary inside the pre-compaction snapshot, and `scripts/summarize.py session|cluster|lesson` for `/handoff done` and `/hamster:retro`. Every output is labelled unverified; the frontier model still corrects it. Rule authoring never goes through the local model. Without the binary (or `HAMSTER_LM=0`) everything falls back to the in-session model.
+Config lives in `~/.claude/hamster/config.json`. Keys are never stored — only an env var name (`--api-key-env`) or a file reference (`--api-key-file ~/.omlx/settings.json#auth.api_key`). `HAMSTER_LM=0` turns the slot off. Every draft is labelled unverified; the frontier model still corrects it, and rule authoring never goes through a local model.
+
+Why two tiers (`evals/haiku-vs-afm/REPORT.md` in kam/claude-settings, Opus blind judge): a Qwen 3.6-35B-A3B MoE gave 16/16 on the yes/no nudge at 0.4 s — as fast as Apple's on-device model, as accurate as Haiku 4.5; a Qwen 3.8-27B dense model beat Haiku 6-0 on session-summary JSON. Apple's on-device model lost every task, so it is the fallback, not the default.
 
 ## Install
 
@@ -90,7 +97,6 @@ python3 scripts/rules.py test && bash tests/test_hooks.sh && python3 -m pytest -
 
 ## Roadmap
 
-- Structured output from `hamster-lm` (`@Generable`) so the cluster step returns JSON, not lines.
 - A `when.cmd_exit` gate for PostToolUse rules (react to a failing command, not just its shape).
 
 ## Why

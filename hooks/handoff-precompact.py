@@ -220,9 +220,9 @@ def render(cwd, top, branch, now, trigger, prompts, files, last_text, last_turn)
     if os.environ.get("HANDOFF_SNAPSHOT_LM", "1") != "0":
         src = "\n".join(f"User: {clip(p, 600)}" for p in prompts[-MAX_PROMPTS:])
         src += "\n\nAssistant (last): " + clip(last_text, 3000)
-        summary = ask(src, SESSION_INSTRUCTIONS, 700)
+        summary = ask(src, SESSION_INSTRUCTIONS, 700, tier="quality")
         if summary:
-            lines += ["", "## Local summary (on-device model, unverified)", "", summary]
+            lines += ["", "## Local summary (local model, unverified)", "", summary]
     lines += [
         "",
         f"## Last text-bearing assistant message (after user prompt {last_turn} of {len(prompts)}; clipped)",

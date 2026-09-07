@@ -13,4 +13,4 @@ done
 [ -n "${DEVELOPER_DIR:-}" ] || { echo "hamster-lm: no Xcode with the FoundationModels SDK found; skipping"; exit 0; }
 swiftc -O -o "$HERE/native/hamster-lm" "$HERE/native/hamster-lm.swift"
 "$HERE/native/hamster-lm" --check && echo "built $HERE/native/hamster-lm"
-mkdir -p "$HOME/.local/bin" && ln -sf "$HERE/native/hamster-lm" "$HOME/.local/bin/hamster-lm" && echo "linked ~/.local/bin/hamster-lm (other plugins find it on PATH)"
+bash "$HERE/scripts/install-shims.sh"

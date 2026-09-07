@@ -61,4 +61,4 @@ def test_retro_includes_local_draft(stub, monkeypatch):
             capture_output=True, text=True, env=os.environ)
     r = subprocess.run([sys.executable, str(retro)], input=json.dumps(
         {"session_id": "L", "cwd": "/tmp/p", "stop_hook_active": False}), capture_output=True, text=True, env=os.environ)
-    assert "Local draft from the on-device model" in json.loads(r.stdout)["reason"]
+    assert "Local draft from the local model" in json.loads(r.stdout)["reason"]
