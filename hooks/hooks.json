@@ -1,0 +1,76 @@
+{
+  "description": "hamster — capture tool failures (PostToolUseFailure), one-step retro on Stop when errors pile up, handoff load + memory decay + rule recall at SessionStart, handoff auto-snapshot before compaction, and deterministic rule guards on Bash/Edit/Write. Every hook fails open.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/rule-guard.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/tool-failure-log.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/error-retro.py",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/handoff-load.py",
+            "timeout": 10,
+            "statusMessage": "Loading handoff"
+          },
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/memory-prune.py",
+            "timeout": 10,
+            "statusMessage": "Pruning expired memory"
+          },
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/rules-recall.py",
+            "timeout": 10,
+            "statusMessage": "Recalling rules"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/handoff-precompact.py",
+            "timeout": 20,
+            "statusMessage": "Writing handoff auto-snapshot"
+          }
+        ]
+      }
+    ]
+  }
+}

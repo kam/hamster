@@ -1,0 +1,19 @@
+# Hooks are stdlib-only scripts copied into ~/.claude/hooks; no pyproject on purpose.
+target-version = "py39"
+line-length = 100
+
+[lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "S", "RET", "RUF", "C90"]
+ignore = [
+    "E501",          # formatter owns line length
+    "S603", "S607",  # subprocess with list args, no shell; noisy for ops scripts
+    "S110", "S112",  # try/except/pass|continue — hooks fail open by design (see docstrings)
+    "BLE001",        # blind except — same fail-open policy
+    "SIM105",        # contextlib.suppress would hide the fail-open intent
+]
+
+[lint.mccabe]
+max-complexity = 10
+
+[format]
+quote-style = "double"

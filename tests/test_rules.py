@@ -1,0 +1,135 @@
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+GUARD = ROOT / "hooks" / "rule-guard.py"
+CLI = ROOT / "scripts" / "rules.py"
+
+
+@pytest.fixture
+def env(tmp_path, monkeypatch):
+    monkeypatch.setenv("HAMSTER_STATE", str(tmp_path / "state"))
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(ROOT))
+    monkeypatch.chdir(tmp_path)  # not a git repo → no project scope
+    return tmp_path
+
+
+def guard(tool, tool_input, cwd="/tmp"):
+    payload = json.dumps({"tool_name": tool, "tool_input": tool_input, "cwd": cwd})
+    return subprocess.run(
+        [sys.executable, str(GUARD)], input=payload, capture_output=True, text=True, env=os.environ
+    )
+
+
+def cli(*args):
+    return subprocess.run(
+        [sys.executable, str(CLI), *args], capture_output=True, text=True, env=os.environ
+    )
+
+
+def test_default_rules_are_green(env):
+    r = cli("test")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "FAIL" not in r.stdout
+
+
+def test_block_exits_2_with_message(env):
+    r = guard("Bash", {"command": "rm -rf ~"})
+    assert r.returncode == 2
+    assert "rm-rf-root-or-home" in r.stderr
+
+
+def test_pass_is_silent(env):
+    r = guard("Bash", {"command": "rm -rf ./build && git push origin main"})
+    assert r.returncode == 0 and r.stdout == "" and r.stderr == ""
+
+
+def test_heredoc_body_is_data(env):
+    r = guard("Bash", {"command": "cat > notes.md <<'EOF'\nnever run rm -rf /\nEOF"})
+    assert r.returncode == 0
+
+
+def test_heredoc_to_shell_still_blocks(env):
+    r = guard("Bash", {"command": "bash <<'EOF'\nrm -rf /\nEOF"})
+    assert r.returncode == 2
+
+
+def test_fires_are_counted(env):
+    guard("Bash", {"command": "chmod 777 x"})
+    guard("Bash", {"command": "chmod 777 y"})
+    fires = json.loads((env / "state" / "rule-fires.json").read_text())
+    assert fires["chmod-777"]["count"] == 2
+
+
+def test_untested_block_rule_downgrades_to_warn(env):
+    rules = env / "state" / "rules"
+    rules.mkdir(parents=True)
+    (rules / "no-foo.json").write_text(json.dumps({
+        "id": "no-foo", "tool": "Bash", "field": "command", "pattern": r"\bfoo\b",
+        "action": "block", "message": "no foo", "tests": [{"input": "foo", "expect": "block"}],
+    }))
+    r = guard("Bash", {"command": "foo"})
+    assert r.returncode == 0
+    assert "warn-only" in r.stdout
+    assert cli("test").returncode == 1  # a block rule without a pass test is a failure
+
+
+def test_add_refuses_red_and_installs_green(env):
+    bad = env / "bad.json"
+    bad.write_text(json.dumps({
+        "id": "no-bar", "tool": "Bash", "field": "command", "pattern": r"\bbar\b",
+        "action": "block", "message": "no bar",
+        "tests": [{"input": "bar", "expect": "block"}, {"input": "bar baz", "expect": "pass"}],
+    }))
+    r = cli("add", str(bad))
+    assert r.returncode == 1 and "FAIL" in r.stdout
+    good = env / "good.json"
+    good.write_text(json.dumps({
+        "id": "no-bar", "tool": "Bash", "field": "command", "pattern": r"\bbar\b",
+        "action": "block", "message": "no bar",
+        "tests": [{"input": "bar", "expect": "block"}, {"input": "barn", "expect": "pass"}],
+    }))
+    r = cli("add", str(good))
+    assert r.returncode == 0, r.stdout
+    assert (env / "state" / "rules" / "no-bar.json").exists()
+    assert cli("add", str(good)).returncode == 1  # duplicate id
+    assert guard("Bash", {"command": "echo bar"}).returncode == 2
+
+
+def test_edit_rule_on_file_path(env):
+    rules = env / "state" / "rules"
+    rules.mkdir(parents=True)
+    (rules / "no-env-edit.json").write_text(json.dumps({
+        "id": "no-env-edit", "tool": ["Edit", "Write"], "field": "file_path",
+        "pattern": r"(^|/)\.env(\.|$)", "action": "block", "message": "never edit .env",
+        "tests": [{"input": "/app/.env", "expect": "block"}, {"input": "/app/.envrc", "expect": "pass"}],
+        "created": "2020-01-01",
+    }))
+    assert guard("Edit", {"file_path": "/app/.env", "old_string": "a", "new_string": "b"}).returncode == 2
+    assert guard("Edit", {"file_path": "/app/.envrc"}).returncode == 0
+    assert guard("Read", {"file_path": "/app/.env"}).returncode == 0
+
+
+def test_prune_lists_old_unfired_and_rm_refuses_default(env):
+    rules = env / "state" / "rules"
+    rules.mkdir(parents=True)
+    (rules / "old.json").write_text(json.dumps({
+        "id": "old", "tool": "Bash", "field": "command", "pattern": "zzz", "action": "warn",
+        "message": "m", "created": "2020-01-01",
+        "tests": [{"input": "zzz", "expect": "block"}, {"input": "a", "expect": "pass"}],
+    }))
+    out = json.loads(cli("prune", "--json").stdout)
+    assert [o["id"] for o in out] == ["old"]
+    assert cli("rm", "chmod-777").returncode == 1
+    assert cli("rm", "old").returncode == 0
+    assert not (rules / "old.json").exists()
+
+
+def test_guard_disabled_by_env(env, monkeypatch):
+    monkeypatch.setenv("HAMSTER_GUARD", "0")
+    assert guard("Bash", {"command": "rm -rf /"}).returncode == 0
