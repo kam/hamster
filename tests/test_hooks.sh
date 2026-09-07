@@ -2,6 +2,7 @@
 # Scenario tests for the handoff hooks. Runs in throwaway repos under mktemp.
 # Usage: tests/test_hooks.sh   (exit 0 = all pass)
 set -u
+export HAMSTER_LM=0   # scenario tests stay deterministic; the model is covered by tests/test_lm.py
 HOOKS="$(cd "$(dirname "$0")/.." && pwd)/hooks"
 LOAD="python3 $HOOKS/handoff-load.py"
 PRE="python3 $HOOKS/handoff-precompact.py"

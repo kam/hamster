@@ -11,7 +11,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _rules import evaluate, load_rules, record_fire  # noqa: E402
+from _rules import context, evaluate, load_rules, record_fire  # noqa: E402
 
 
 def main():
@@ -22,7 +22,8 @@ def main():
     tool_input = data.get("tool_input") or {}
     if not isinstance(tool_input, dict):
         return
-    hits = evaluate(load_rules(data.get("cwd")), tool, tool_input)
+    cwd = data.get("cwd")
+    hits = evaluate(load_rules(cwd), tool, tool_input, context(cwd))
     if not hits:
         return
     blocks, warns = [], []

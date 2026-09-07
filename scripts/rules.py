@@ -136,6 +136,9 @@ def cmd_add(args):
 def cmd_check(args):
     field = "command" if args.tool == "Bash" else args.field
     hits = evaluate(load_rules(), args.tool, {field: args.input})
+    gated = [r["id"] for r in iter_rules(load_rules()) if r.get("when")]
+    if gated:
+        print(f"(when-gated rules evaluated against this cwd/branch: {', '.join(gated)})")
     if not hits:
         print("no rule fires")
         return 0

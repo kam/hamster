@@ -12,6 +12,7 @@ If `~/.claude/scripts/session-stats.py` exists, run it via Bash and show its std
 
 - `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/rules.py list` — rules already enforcing lessons; do not re-propose one.
 - `cat ~/.claude/hamster/session-errors/<session_id>.jsonl 2>/dev/null` — this session's failed tool calls (the `error-retro` hook's source). If the file is absent, use the `is_error` tool results you can see.
+- `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/summarize.py cluster < ~/.claude/hamster/session-errors/<session_id>.jsonl` — free root-cause grouping from the on-device model when built (exit 3 otherwise); treat as a draft.
 - When `navigator` is on PATH: `navigator search "<top error cause>" --type solutions --limit 5` — lessons other projects already paid for.
 
 ## Step 2 — Review the conversation

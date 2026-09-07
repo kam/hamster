@@ -47,11 +47,27 @@ State lives in `~/.claude/hamster/`. Project rules live in `<repo>/.claude/hamst
 }
 ```
 
+Optional `when` gate, checked before the pattern (all keys AND-ed):
+
+```json
+"when": {"files_exist": ["Gemfile"], "path_glob": "app/**/*.rb", "branch_not": ["main"]}
+```
+
+`files_exist` is the stack check (Gemfile = Ruby, Cargo.toml = Rust) — no language list to maintain. `path_glob` scopes Edit/Write rules to a folder; `branch` / `branch_not` relax or tighten by branch.
+
 `python3 scripts/rules.py add rule.json` validates, runs the tests, and refuses on red. `check Bash "<cmd>"` is a dry run. Heredoc bodies that are data never trip a pattern; bodies piped to a shell do.
 
 ## Navigator
 
 When the [`navigator`](https://github.com/kam/navigator) CLI is on `PATH`, hamster reads and writes cross-project lessons as `solutions` nodes and session records as `sessions` nodes: the retro lists matching solutions as "already recorded", `/handoff done` files a session node, `/hamster:promote` back-links the node with `promoted_to`, and session start shows this repo's earlier lessons. Without it everything falls back to Claude Code auto-memory. Nothing writes the vault markdown directly.
+
+## On-device model (macOS 26+)
+
+```bash
+scripts/build-native.sh     # compiles native/hamster-lm with the FoundationModels SDK
+```
+
+With the binary present, hamster uses Apple's on-device model for the cheap steps, at zero API tokens: the retro's error grouping and lesson first draft, a session summary inside the pre-compaction snapshot, and `scripts/summarize.py session|cluster|lesson` for `/handoff done` and `/hamster:retro`. Every output is labelled unverified; the frontier model still corrects it. Rule authoring never goes through the local model. Without the binary (or `HAMSTER_LM=0`) everything falls back to the in-session model.
 
 ## Install
 
@@ -74,8 +90,8 @@ python3 scripts/rules.py test && bash tests/test_hooks.sh && python3 -m pytest -
 
 ## Roadmap
 
-- Local summariser backend (Apple Foundation Models on macOS 26+) for session summaries, error clustering and lesson first drafts. Rule authoring stays with the frontier model.
-- `rules.py` conditions beyond regex (cwd, branch, file exists).
+- Structured output from `hamster-lm` (`@Generable`) so the cluster step returns JSON, not lines.
+- A `when.cmd_exit` gate for PostToolUse rules (react to a failing command, not just its shape).
 
 ## Why
 

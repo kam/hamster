@@ -1,13 +1,21 @@
 {
   "name": "hamster",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "The wheel: capture failures, retro, handoff, promote lessons to tested hook rules, prune what stops firing",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "pi": {
-    "extensions": ["./pi/extensions"],
-    "skills": ["./skills"],
-    "prompts": ["./pi/prompts"]
+    "extensions": [
+      "./pi/extensions"
+    ],
+    "skills": [
+      "./skills"
+    ],
+    "prompts": [
+      "./pi/prompts"
+    ]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"

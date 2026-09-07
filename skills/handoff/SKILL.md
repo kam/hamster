@@ -101,6 +101,9 @@ Three modes. Default is **write**.
    `--project`. Body = a condensed copy of the handoff: goal, decisions with their why, problems
    solved, tried-and-failed, what shipped and where. Paths and URLs only, no diffs or transcript
    text; run the same secrets check as write mode.
+   Draft the body for free first: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/summarize.py session < <handoff
+   file>` (exit 3 = no on-device model; write it yourself). Correct the draft against the handoff —
+   the local model keeps names and paths but has no repo knowledge.
 
    ```bash
    printf '%s\n' "<condensed body>" | navigator insert --type sessions \

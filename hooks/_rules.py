@@ -10,9 +10,15 @@ Required keys: id, tool, field, pattern, action (block|warn), message, tests.
 A `block` rule with no test of each kind (expect block AND expect pass) is
 downgraded to `warn` at load and flagged `untested` — a guard nobody has
 proven is a nuisance, not a rule. Optional: event (default PreToolUse),
-flags ("i" for case-insensitive), source, created, note.
+flags ("i" for case-insensitive), source, created, note, and `when` — an
+optional gate checked before the pattern, all keys AND-ed:
+  files_exist: ["Gemfile"]        any listed file exists at the git toplevel (language/stack check)
+  path_glob:   "app/**/*.rb"      the inspected path (file_path field, or cwd for Bash) matches
+  branch:      ["main"]           current branch is one of these
+  branch_not:  ["main"]           current branch is none of these
 """
 
+import fnmatch
 import json
 import os
 import re
@@ -24,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import git, state_dir  # noqa: E402
 
 REQUIRED = ("id", "tool", "field", "pattern", "action", "message", "tests")
+WHEN_KEYS = ("files_exist", "path_glob", "branch", "branch_not")
 ACTIONS = ("block", "warn")
 ID_RX = re.compile(r"^[a-z0-9][a-z0-9-]{1,60}$")
 FIRES = state_dir("rule-fires.json")
@@ -73,6 +80,14 @@ def validate(rule):
         re.compile(rule["pattern"], re.I if "i" in str(rule.get("flags", "")) else 0)
     except re.error as e:
         problems.append(f"pattern does not compile: {e}")
+    when = rule.get("when")
+    if when is not None:
+        if not isinstance(when, dict):
+            problems.append("when must be an object")
+        else:
+            for k in when:
+                if k not in WHEN_KEYS:
+                    problems.append(f"unknown when key `{k}` (allowed: {', '.join(WHEN_KEYS)})")
     tests = rule["tests"]
     if not isinstance(tests, list):
         problems.append("tests must be a list")
@@ -137,13 +152,56 @@ def matches(rule, text):
     return re.search(rule["pattern"], text, flags | re.M) is not None
 
 
-def evaluate(rules, tool_name, tool_input):
+def context(cwd=None):
+    """Repo facts every `when` gate reads, computed once per hook call."""
+    cwd = cwd or os.getcwd()
+    top = git(["rev-parse", "--show-toplevel"], cwd)
+    return {"cwd": cwd, "top": top, "branch": git(["branch", "--show-current"], cwd) or ""}
+
+
+def _glob_match(path, pattern, top):
+    p = path
+    if top and os.path.isabs(p):
+        try:
+            p = os.path.relpath(p, top)
+        except ValueError:
+            pass
+    return fnmatch.fnmatch(p, pattern) or fnmatch.fnmatch(path, pattern)
+
+
+def when_ok(rule, tool_input, ctx):
+    """True when the rule's `when` gate passes (or there is none)."""
+    when = rule.get("when") or {}
+    if not when:
+        return True
+    if "files_exist" in when:
+        base = ctx.get("top") or ctx.get("cwd") or "."
+        names = when["files_exist"] if isinstance(when["files_exist"], list) else [when["files_exist"]]
+        if not any(os.path.exists(os.path.join(base, n)) for n in names):
+            return False
+    if "branch" in when and ctx.get("branch") not in when["branch"]:
+        return False
+    if "branch_not" in when and ctx.get("branch") in when["branch_not"]:
+        return False
+    if "path_glob" in when:
+        path = tool_input.get("file_path") if isinstance(tool_input, dict) else None
+        path = path or ctx.get("cwd") or ""
+        if not _glob_match(path, when["path_glob"], ctx.get("top")):
+            return False
+    return True
+
+
+def evaluate(rules, tool_name, tool_input, ctx=None):
     """[(rule, effective_action)] for every rule that fires."""
     hits = []
+    ctx = ctx if ctx is not None else context()
     for rule in iter_rules(rules):
         text = rule_input(rule, tool_name, tool_input)
-        if text is not None and matches(rule, text):
-            hits.append((rule, rule["_effective"]))
+        if text is None or not matches(rule, text):
+            continue
+        if not when_ok(rule, tool_input, ctx):
+            continue
+        hits.append((rule, rule["_effective"]))
     return hits
 
 

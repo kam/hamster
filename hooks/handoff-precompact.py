@@ -35,6 +35,7 @@ try:
         repo_context,
         slug,
     )
+    from _lm import SESSION_INSTRUCTIONS, ask
 except Exception:  # a broken helper must never block a session or a compaction
     sys.exit(0)
 
@@ -216,6 +217,12 @@ def render(cwd, top, branch, now, trigger, prompts, files, last_text, last_turn)
         lines += [f"{i}. {clip(p, PROMPT_LEN)}" for i, p in enumerate(shown, 1)] or ["(none)"]
     else:
         lines += ["", "## User prompts", "", "(capture disabled: HANDOFF_SNAPSHOT_PROMPTS=0)"]
+    if os.environ.get("HANDOFF_SNAPSHOT_LM", "1") != "0":
+        src = "\n".join(f"User: {clip(p, 600)}" for p in prompts[-MAX_PROMPTS:])
+        src += "\n\nAssistant (last): " + clip(last_text, 3000)
+        summary = ask(src, SESSION_INSTRUCTIONS, 700)
+        if summary:
+            lines += ["", "## Local summary (on-device model, unverified)", "", summary]
     lines += [
         "",
         f"## Last text-bearing assistant message (after user prompt {last_turn} of {len(prompts)}; clipped)",

@@ -1,11 +1,18 @@
 {
   "name": "hamster",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The wheel: a self-learning loop for Claude Code — capture tool failures, run a one-step retro, keep a handoff across compaction, and promote lessons into deterministic hook rules with keep-tests that are pruned when they stop firing. Navigator-aware, auto-memory fallback.",
   "author": {
     "name": "Khamsouk Souvanlasy",
     "email": "khamsouk@souvanlasy.com"
   },
   "license": "MIT",
-  "keywords": ["claude-code", "hooks", "handoff", "retrospective", "self-improving", "guardrails"]
+  "keywords": [
+    "claude-code",
+    "hooks",
+    "handoff",
+    "retrospective",
+    "self-improving",
+    "guardrails"
+  ]
 }

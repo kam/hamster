@@ -133,3 +133,55 @@ def test_prune_lists_old_unfired_and_rm_refuses_default(env):
 def test_guard_disabled_by_env(env, monkeypatch):
     monkeypatch.setenv("HAMSTER_GUARD", "0")
     assert guard("Bash", {"command": "rm -rf /"}).returncode == 0
+
+
+def _rule(**kw):
+    base = {
+        "id": "gated", "tool": "Bash", "field": "command", "pattern": r"\bqux\b",
+        "action": "block", "message": "no qux",
+        "tests": [{"input": "qux", "expect": "block"}, {"input": "quxx", "expect": "pass"}],
+    }
+    base.update(kw)
+    return base
+
+
+@pytest.fixture
+def repo(env):
+    subprocess.run(["git", "init", "-q", "-b", "feature/x"], cwd=env, check=True)
+    rules = env / "state" / "rules"
+    rules.mkdir(parents=True)
+    return env, rules
+
+
+def test_when_files_exist_gates_by_stack(repo):
+    env, rules = repo
+    (rules / "gated.json").write_text(json.dumps(_rule(when={"files_exist": ["Gemfile", "gems.rb"]})))
+    assert guard("Bash", {"command": "qux"}, cwd=str(env)).returncode == 0  # no Gemfile → skip
+    (env / "Gemfile").write_text("")
+    assert guard("Bash", {"command": "qux"}, cwd=str(env)).returncode == 2
+
+
+def test_when_branch_gates(repo):
+    env, rules = repo
+    (rules / "gated.json").write_text(json.dumps(_rule(when={"branch_not": ["feature/x"]})))
+    assert guard("Bash", {"command": "qux"}, cwd=str(env)).returncode == 0
+    (rules / "gated.json").write_text(json.dumps(_rule(when={"branch": ["feature/x"]})))
+    assert guard("Bash", {"command": "qux"}, cwd=str(env)).returncode == 2
+
+
+def test_when_path_glob_scopes_edit_rules(repo):
+    env, rules = repo
+    (rules / "gated.json").write_text(json.dumps(_rule(
+        tool="Edit", field="content", pattern=r"binding\.pry", when={"path_glob": "app/**/*.rb"},
+        tests=[{"input": "binding.pry", "expect": "block"}, {"input": "x", "expect": "pass"}])))
+    hit = guard("Edit", {"file_path": f"{env}/app/models/u.rb", "new_string": "binding.pry"}, cwd=str(env))
+    miss = guard("Edit", {"file_path": f"{env}/spec/u_spec.rb", "new_string": "binding.pry"}, cwd=str(env))
+    assert hit.returncode == 2 and miss.returncode == 0
+
+
+def test_when_unknown_key_is_invalid(repo):
+    env, rules = repo
+    (rules / "gated.json").write_text(json.dumps(_rule(when={"language": "ruby"})))
+    out = cli("list", "--json").stdout
+    assert "unknown when key" in out
+    assert guard("Bash", {"command": "qux"}, cwd=str(env)).returncode == 0

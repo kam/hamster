@@ -37,6 +37,7 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import has_navigator, memory_dir, state_dir  # noqa: E402
+from _lm import CLUSTER_INSTRUCTIONS, LESSON_INSTRUCTIONS, ask  # noqa: E402
 from _store import existing_lessons  # noqa: E402
 
 THRESHOLD = int(os.environ.get("ERROR_RETRO_THRESHOLD", "8"))
@@ -230,6 +231,14 @@ def main():
                  "--body - --actor agent:claude-code\n"
                  "(the store is the shared vault; `/remember` is the same write).\n")
 
+    local = ""
+    err_text = "\n".join(f"- {s}" for s, _ in counts.most_common(MAX_SNIPPETS))
+    groups = ask(err_text, CLUSTER_INSTRUCTIONS, 250)
+    if groups:
+        draft = ask(groups, LESSON_INSTRUCTIONS, 150) or ""
+        local = ("Local draft from the on-device model (zero tokens; verify before saving, "
+                 "it does not know the repo):\n" + groups + ("\n" + draft if draft else "") + "\n")
+
     reason = (
         f"error-retro hook: {new} tool errors this session since the last check "
         f"({total} total). Before stopping, do a one-step retrospective:\n"
@@ -245,7 +254,7 @@ def main():
         f"catch* (a command shape, a path, a flag), say `/hamster:promote <name>` "
         f"is the next step.\n"
         f"3. Tell the user in one line what you saved, or that nothing was durable.\n"
-        f"{promo}{existing_block}"
+        f"{promo}{existing_block}{local}"
         f"Errors:\n" + "\n".join(lines)
     )
     print(json.dumps({"decision": "block", "reason": reason}))
