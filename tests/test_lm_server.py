@@ -125,3 +125,21 @@ def test_lm_cli_set_refuses_unserved_model_and_saves_good(env, server):
     assert cfg["lm"]["server"]["models"] == {"fast": "small-1b", "quality": "big-27b"}
     r = subprocess.run([*cli, "clear"], capture_output=True, text=True, env=os.environ)
     assert "server" not in json.loads((env / "state" / "config.json").read_text())["lm"]
+
+
+def test_one_bad_reply_does_not_mark_server_down(env, server):
+    class Flaky(Handler):
+        n = 0
+        def do_POST(self):
+            Flaky.n += 1
+            if Flaky.n == 1:
+                self.send_response(500); self.end_headers(); return
+            Handler.do_POST(self)
+    srv = http.server.HTTPServer(("127.0.0.1", 0), Flaky)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_port}/v1"
+    write_cfg(env, {"url": url, "models": {"quality": "big-27b"}})
+    lm = load("_lm")
+    assert lm.ask("q", "i", 20) == "REPLY from big-27b"  # retried once, succeeded
+    assert lm._check_cache()["server"]["ok"] is True
+    srv.shutdown()

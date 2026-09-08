@@ -43,7 +43,7 @@ from _common import state_dir  # noqa: E402
 
 INPUT_CHARS_AFM = 12_000  # ~3k tokens; AFM window is 4–8k
 INPUT_CHARS_SERVER = 60_000
-TIMEOUT = float(os.environ.get("HAMSTER_LM_TIMEOUT", "60"))
+TIMEOUT = float(os.environ.get("HAMSTER_LM_TIMEOUT", "120"))  # first call may load weights
 CHECK_TTL_AFM = 86_400
 CHECK_TTL_SERVER = 600
 CONFIG = state_dir("config.json")
@@ -150,13 +150,23 @@ def server_ask(server, prompt, instructions, max_tokens, tier):
                      {"role": "user", "content": prompt[-INPUT_CHARS_SERVER:]}],
     }
     body.update(server.get("extra") or {})
-    try:
-        d = _http(server["url"].rstrip("/") + "/chat/completions", resolve_key(server), body, TIMEOUT)
-        text = d["choices"][0]["message"]["content"]
-    except Exception:
-        cache = _check_cache()
-        cache["server"] = {"url": server["url"], "ok": False, "ts": time.time()}
-        _check_save(cache)
+    key = resolve_key(server)
+    text = None
+    for attempt in (1, 2):  # one retry: a server that just (re)loaded a model can 5xx once
+        try:
+            d = _http(server["url"].rstrip("/") + "/chat/completions", key, body, TIMEOUT)
+            text = d["choices"][0]["message"]["content"]
+            break
+        except Exception:
+            if attempt == 1:
+                time.sleep(1.5)
+    if text is None:
+        # mark the server down only when it is really gone; a bad reply with a live
+        # /models keeps it configured so the next hook call tries again
+        if server_models(server["url"], key) is None:
+            cache = _check_cache()
+            cache["server"] = {"url": server["url"], "ok": False, "ts": time.time()}
+            _check_save(cache)
         return None
     text = re.sub(r"<think>.*?</think>\s*", "", text or "", flags=re.S).strip()
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
