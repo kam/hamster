@@ -1,6 +1,6 @@
 {
   "name": "hamster",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "The wheel: capture failures, retro, handoff, promote lessons to tested hook rules, prune what stops firing",
   "keywords": [
