@@ -1,5 +1,5 @@
 {
-  "description": "hamster — capture tool failures (PostToolUseFailure), one-step retro on Stop when errors pile up, handoff load + memory decay + rule recall at SessionStart, handoff auto-snapshot before compaction, and deterministic rule guards on Bash/Edit/Write. Every hook fails open.",
+  "description": "hamster — capture tool failures (PostToolUseFailure), one-step retro on Stop when errors pile up, handoff load + memory decay + rule recall at SessionStart, handoff auto-snapshot before compaction, deterministic rule guards on Bash/Edit/Write, and cold-cache cost guards on SendMessage (idle agent) and UserPromptSubmit (idle chat). Every hook fails open.",
   "hooks": {
     "PreToolUse": [
       {
@@ -9,6 +9,27 @@
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/rule-guard.py",
             "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "SendMessage",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/wake-guard.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stale-guard.py",
+            "timeout": 5
           }
         ]
       }

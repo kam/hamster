@@ -17,6 +17,8 @@ The premise: a lesson that lives as prose gets forgotten. A lesson that lives as
 | `hooks/tool-failure-log.py` | PostToolUseFailure | One JSONL line per failed tool call, `~/.claude/hamster/session-errors/` |
 | `hooks/error-retro.py` | Stop | After 8 new errors, blocks the stop once and asks for the one durable lesson. Fingerprint ledger says "seen in N sessions across M projects". |
 | `hooks/rule-guard.py` | PreToolUse Bash/Edit/Write | Applies every rule; `block` = exit 2 with the message, `warn` = note. Counts fires. |
+| `hooks/wake-guard.py` | PreToolUse SendMessage | Blocks, once, a message to a sub-agent idle past its ~5-minute cache with 60k+ tokens; states the re-write cost. The same send again within 10 minutes passes. `HAMSTER_WAKE_GUARD=0` disables. |
+| `hooks/stale-guard.py` | UserPromptSubmit | Blocks, once, the first prompt into a chat idle past its ~1-hour cache with 100k+ tokens; states the cost and the choice (`/clear`, or send again). Slash commands pass. `HAMSTER_STALE_GUARD=0` disables. |
 | `hooks/rules-recall.py` | SessionStart | One line: rules active, untested, stale. Plus earlier Navigator lessons for this repo. |
 | `hooks/memory-prune.py` | SessionStart | Archives auto-memory files whose `decay_days` elapsed; sweeps old markers |
 | `hooks/handoff-load.py` / `handoff-precompact.py` | SessionStart / PreCompact | The [claude-handoff](https://github.com/kam/claude-handoff) pair, now bundled |
