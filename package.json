@@ -14,7 +14,7 @@
       "./skills"
     ],
     "prompts": [
-      "./pi/prompts"
+      "./commands"
     ]
   },
   "peerDependencies": {

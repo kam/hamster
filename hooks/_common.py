@@ -134,7 +134,7 @@ def frontmatter(text):
         return {}
     fm = {}
     for line in text[3:end].splitlines():
-        m = re.match(r"^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$", line)
+        m = re.match(r"^\s*([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$", line)
         if m:
             fm[m.group(1)] = m.group(2).strip().strip('"').strip("'")
     return fm

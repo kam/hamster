@@ -2,15 +2,18 @@
   "id": "chmod-777",
   "tool": "Bash",
   "field": "command",
-  "pattern": "(^|[;&|(]\\s*|\\s)chmod\\s+(-[a-zA-Z]+\\s+)*(a\\+rwx|777|0777)\\b",
+  "pattern": "(^|[;&|(]\\s*|\\s)chmod\\s+(-[a-zA-Z]+\\s+)*(a[+=]rwx|ugo[+=]rwx|777|0777)\\b",
   "action": "block",
   "message": "chmod 777 makes the path world-writable. Use the narrowest mode (755 / 644 / u+x).",
   "source": "bundled",
   "created": "2026-09-07",
+  "keep": true,
   "tests": [
     {"input": "chmod 777 script.sh", "expect": "block"},
     {"input": "chmod -R 0777 /srv", "expect": "block"},
     {"input": "chmod a+rwx dir", "expect": "block"},
+    {"input": "chmod a=rwx dir", "expect": "block"},
+    {"input": "chmod ugo+rwx dir", "expect": "block"},
     {"input": "chmod +x script.sh", "expect": "pass"},
     {"input": "chmod 755 bin/run", "expect": "pass"}
   ]

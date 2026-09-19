@@ -6,13 +6,11 @@ Every call fails soft to an empty result.
 
 import json
 import os
-import re
 import subprocess
 import sys
-from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _common import has_navigator, memory_dir  # noqa: E402
+from _common import frontmatter, has_navigator, memory_dir  # noqa: E402
 
 MAX_EXISTING = 15
 
@@ -80,13 +78,11 @@ def memory_lessons(cwd, types=("feedback", "project"), limit=MAX_EXISTING):
             head = p.read_text(encoding="utf-8", errors="replace")[:1200]
         except OSError:
             continue
-        m_type = re.search(r"^\s*type:\s*(\w+)", head, re.M)
-        if m_type and m_type.group(1) not in types:
+        fm = frontmatter(head)
+        if fm.get("type") and fm["type"] not in types:
             continue
-        m_desc = re.search(r"^description:\s*(.+)$", head, re.M)
-        m_name = re.search(r"^name:\s*(.+)$", head, re.M)
-        name = (m_name.group(1) if m_name else p.stem).strip()
-        desc = (m_desc.group(1) if m_desc else "").strip()[:110]
+        name = fm.get("name") or p.stem
+        desc = fm.get("description", "")[:110]
         out.append((name, desc))
         if len(out) >= limit:
             break
@@ -118,13 +114,12 @@ def memory_path_for(cwd, name):
             head = p.read_text(encoding="utf-8", errors="replace")[:400]
         except OSError:
             continue
-        if re.search(rf"^name:\s*{re.escape(name)}\s*$", head, re.M):
+        if frontmatter(head).get("name") == name:
             return p
     return None
 
 
 __all__ = [
-    "Path",
     "existing_lessons",
     "memory_lessons",
     "memory_path_for",

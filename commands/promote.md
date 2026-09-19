@@ -27,6 +27,7 @@ Write `/tmp/hamster-rule-<id>.json` in this format (`${CLAUDE_PLUGIN_ROOT}/rules
   "action": "block",              // or warn
   "message": "<what to do instead, one sentence>",
   "source": "memory:<name>" | "solutions/<slug>" | "text",
+  "keep": false,                  // true = never listed for pruning (hard-safety rules)
   "tests": [
     {"input": "<the exact bad shape>", "expect": "block"},
     {"input": "<a near-miss that must still work>", "expect": "pass"}
@@ -34,13 +35,15 @@ Write `/tmp/hamster-rule-<id>.json` in this format (`${CLAUDE_PLUGIN_ROOT}/rules
 }
 ```
 
-At least two `block` and two `pass` tests. Pass tests are the important ones: each is a legitimate command the rule must not touch. Prefer `warn` when the bad shape is sometimes right.
+At least one `block` and one `pass` test (that is what makes a rule *tested*); add more `pass` tests than you think you need — each is a legitimate command the rule must not touch. Prefer `warn` when the bad shape is sometimes right.
 
 ## 3. Prove it, then install
 
 ```bash
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/rules.py add /tmp/hamster-rule-<id>.json --scope user
 ```
+
+Optional `when` gate (`files_exist`, `path_glob` for Edit/Write, `branch`, `branch_not`) narrows where the rule applies; see the README.
 
 `--scope project` writes to `<repo>/.claude/hamster/rules/` (committed, shared with the team) — use it when the lesson is about this repo only. The command refuses on any red test or a duplicate id; fix the pattern, never the test, and rerun. Then `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/rules.py check Bash "<bad shape>"` once more as a live confirmation.
 

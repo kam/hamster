@@ -1,4 +1,5 @@
-# Hooks are stdlib-only scripts copied into ~/.claude/hooks; no pyproject on purpose.
+# Hooks are stdlib-only scripts run in place from the plugin root; no pyproject on purpose.
+# `ruff check .` when ruff is installed (brew install ruff); not required to run hamster.
 target-version = "py39"
 line-length = 100
 

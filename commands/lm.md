@@ -24,4 +24,4 @@ The local-model slot drafts summaries, error clusters and the "worth remembering
    Add the `--extra` thinking-off flag for Qwen 3.x models on oMLX/llama.cpp (thinking tokens slow a 0.4 s verdict to 10 s). The command refuses when the server does not answer or a model is not served — fix and rerun, do not edit the JSON by hand.
 4. `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/lm.py test` and show the two round-trips. Report in three lines: server, fast/quality models, and that Apple on-device (if present) remains the fallback.
 
-Evidence for the tiering: `evals/haiku-vs-afm/REPORT.md` in the claude-settings repo — a 35B-A3B MoE gives Haiku-level yes/no verdicts at Apple-model speed; a 27B dense model beat Haiku on session summaries.
+Evidence for the tiering (author's eval, 2026-09-08, Opus as blind judge): a 35B-A3B MoE gives Haiku-level yes/no verdicts at Apple-model speed; a 27B dense model beat Haiku on session summaries.

@@ -43,7 +43,10 @@ from _common import state_dir  # noqa: E402
 
 INPUT_CHARS_AFM = 12_000  # ~3k tokens; AFM window is 4–8k
 INPUT_CHARS_SERVER = 60_000
-TIMEOUT = float(os.environ.get("HAMSTER_LM_TIMEOUT", "120"))  # first call may load weights
+TIMEOUT = float(os.environ.get("HAMSTER_LM_TIMEOUT", "120"))  # CLI / skills: first call may load weights
+# Hooks run under Claude Code's per-hook budget (see hooks.json); a cold server must
+# fall through, not kill the hook. Hooks pass timeout=HOOK_TIMEOUT to ask().
+HOOK_TIMEOUT = float(os.environ.get("HAMSTER_LM_HOOK_TIMEOUT", "8"))
 CHECK_TTL_AFM = 86_400
 CHECK_TTL_SERVER = 600
 CONFIG = state_dir("config.json")
@@ -138,7 +141,8 @@ def server_ok(server):
     return ok
 
 
-def server_ask(server, prompt, instructions, max_tokens, tier):
+def server_ask(server, prompt, instructions, max_tokens, tier, timeout=None):
+    timeout = timeout or TIMEOUT
     model = (server.get("models") or {}).get(tier) or (server.get("models") or {}).get("quality")
     if not model:
         return None
@@ -154,7 +158,7 @@ def server_ask(server, prompt, instructions, max_tokens, tier):
     text = None
     for attempt in (1, 2):  # one retry: a server that just (re)loaded a model can 5xx once
         try:
-            d = _http(server["url"].rstrip("/") + "/chat/completions", key, body, TIMEOUT)
+            d = _http(server["url"].rstrip("/") + "/chat/completions", key, body, timeout)
             text = d["choices"][0]["message"]["content"]
             break
         except Exception:
@@ -206,13 +210,14 @@ def afm_available():
     return ok
 
 
-def afm_ask(prompt, instructions, max_tokens):
+def afm_ask(prompt, instructions, max_tokens, timeout=None):
+    timeout = timeout or TIMEOUT
     cmd = [afm_binary(), "--max-tokens", str(max_tokens)]
     if instructions:
         cmd += ["--instructions", instructions]
     try:
         out = subprocess.run(cmd, input=prompt[-INPUT_CHARS_AFM:], capture_output=True, text=True,
-                             timeout=min(TIMEOUT, 30))
+                             timeout=min(timeout, 30))
     except Exception:
         return None
     text = out.stdout.strip()
@@ -236,17 +241,18 @@ def available():
     return backend() is not None
 
 
-def ask(prompt, instructions=None, max_tokens=400, tier="quality"):
-    """Reply text, or None when no local model is usable. Never raises."""
+def ask(prompt, instructions=None, max_tokens=400, tier="quality", timeout=None):
+    """Reply text, or None when no local model is usable. Never raises.
+    `timeout` (seconds) caps one model call; hooks pass HOOK_TIMEOUT."""
     if not prompt or os.environ.get("HAMSTER_LM") == "0":
         return None
     server = load_config().get("lm", {}).get("server")
     if server and server_ok(server):
-        out = server_ask(server, prompt, instructions, max_tokens, tier)
+        out = server_ask(server, prompt, instructions, max_tokens, tier, timeout)
         if out:
             return out
     if afm_available():
-        return afm_ask(prompt, instructions, max_tokens)
+        return afm_ask(prompt, instructions, max_tokens, timeout)
     return None
 
 

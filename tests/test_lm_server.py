@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -143,3 +144,27 @@ def test_one_bad_reply_does_not_mark_server_down(env, server):
     assert lm.ask("q", "i", 20) == "REPLY from big-27b"  # retried once, succeeded
     assert lm._check_cache()["server"]["ok"] is True
     srv.shutdown()
+
+
+def test_hook_timeout_is_passed_and_snapshot_survives_slow_server(env, tmp_path):
+    """A server that never answers must not cost the pre-compaction snapshot."""
+    import socket
+    sock = socket.socket(); sock.bind(("127.0.0.1", 0)); sock.listen(1)  # accepts, never replies
+    url = f"http://127.0.0.1:{sock.getsockname()[1]}/v1"
+    (env / "state").mkdir(parents=True, exist_ok=True)
+    (env / "state" / "lm-check.json").write_text(json.dumps({"server": {"url": url, "ok": True, "ts": time.time()}}))
+    write_cfg(env, {"url": url, "models": {"quality": "x"}})
+    lm = load("_lm")
+    t0 = time.time()
+    assert lm.ask("q", "i", 20, timeout=1) is None
+    assert time.time() - t0 < 6  # 2 attempts x 1 s + one 1.5 s sleep, not TIMEOUT
+    repo = tmp_path / "repo"; repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "b"], cwd=repo, check=True)
+    os.environ["HAMSTER_LM_HOOK_TIMEOUT"] = "1"
+    r = subprocess.run([sys.executable, str(ROOT / "hooks" / "handoff-precompact.py")],
+                       input=json.dumps({"cwd": str(repo), "transcript_path": "", "trigger": "auto"}),
+                       capture_output=True, text=True, env=os.environ, timeout=25)
+    del os.environ["HAMSTER_LM_HOOK_TIMEOUT"]
+    assert r.returncode == 0
+    assert list((repo / ".claude" / "handoffs").glob("*auto-snapshot.md"))
+    sock.close()

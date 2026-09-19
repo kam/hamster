@@ -185,3 +185,60 @@ def test_when_unknown_key_is_invalid(repo):
     out = cli("list", "--json").stdout
     assert "unknown when key" in out
     assert guard("Bash", {"command": "qux"}, cwd=str(env)).returncode == 0
+
+
+def test_heredoc_to_sh_named_file_is_data(env):
+    r = guard("Bash", {"command": "cat > deploy.sh <<'EOF'\nchmod 777 /srv\nEOF"})
+    assert r.returncode == 0
+    r = guard("Bash", {"command": "sudo sh <<'EOF'\nchmod 777 /srv\nEOF"})
+    assert r.returncode == 2
+
+
+def test_default_rule_coverage(env):
+    for cmd in ("rm -rf ~/", 'rm -rf "$HOME"', "rm -rf $HOME/", "git push origin +main", "chmod a=rwx x"):
+        assert guard("Bash", {"command": cmd}).returncode == 2, cmd
+    for cmd in ("rm -rf ~/.cache/x", 'rm -rf "$HOME/tmp"', "git push origin +feature/x"):
+        assert guard("Bash", {"command": cmd}).returncode == 0, cmd
+
+
+def test_bare_force_push_gated_by_branch(repo):
+    env, _ = repo  # branch feature/x
+    assert guard("Bash", {"command": "git push --force"}, cwd=str(env)).returncode == 0
+    subprocess.run(["git", "checkout", "-q", "-b", "main"], cwd=env, check=True)
+    assert guard("Bash", {"command": "git push --force"}, cwd=str(env)).returncode == 2
+
+
+def test_prune_and_recall_skip_defaults_and_keep(env):
+    rules = env / "state" / "rules"
+    rules.mkdir(parents=True)
+    (rules / "kept.json").write_text(json.dumps({
+        "id": "kept", "tool": "Bash", "field": "command", "pattern": "zzz", "action": "warn",
+        "message": "m", "created": "2020-01-01", "keep": True,
+        "tests": [{"input": "zzz", "expect": "block"}, {"input": "a", "expect": "pass"}],
+    }))
+    assert json.loads(cli("prune", "--json").stdout) == []  # defaults (never fired) and keep:true exempt
+    r = subprocess.run([sys.executable, str(ROOT / "hooks" / "rules-recall.py")],
+                       input=json.dumps({"cwd": "/tmp"}), capture_output=True, text=True, env=os.environ)
+    assert "never fired" not in r.stdout
+
+
+def test_created_defaults_to_file_date(env):
+    rules = env / "state" / "rules"
+    rules.mkdir(parents=True)
+    (rules / "nodate.json").write_text(json.dumps({
+        "id": "nodate", "tool": "Bash", "field": "command", "pattern": "zzz", "action": "warn",
+        "message": "m", "tests": [{"input": "zzz", "expect": "block"}, {"input": "a", "expect": "pass"}],
+    }))
+    row = next(r for r in json.loads(cli("list", "--json").stdout)["rules"] if r["id"] == "nodate")
+    assert len(row["created"]) == 10
+
+
+def test_path_glob_star_stops_at_slash_and_bash_rejected(repo):
+    env, rules = repo
+    (rules / "gated.json").write_text(json.dumps(_rule(
+        tool="Edit", field="content", pattern=r"binding\.pry", when={"path_glob": "app/*.rb"},
+        tests=[{"input": "binding.pry", "expect": "block"}, {"input": "x", "expect": "pass"}])))
+    assert guard("Edit", {"file_path": f"{env}/app/x.rb", "new_string": "binding.pry"}, cwd=str(env)).returncode == 2
+    assert guard("Edit", {"file_path": f"{env}/app/models/u.rb", "new_string": "binding.pry"}, cwd=str(env)).returncode == 0
+    (rules / "gated.json").write_text(json.dumps(_rule(when={"path_glob": "app/*.rb"})))
+    assert "path_glob needs" in cli("list", "--json").stdout

@@ -10,15 +10,16 @@ Required keys: id, tool, field, pattern, action (block|warn), message, tests.
 A `block` rule with no test of each kind (expect block AND expect pass) is
 downgraded to `warn` at load and flagged `untested` — a guard nobody has
 proven is a nuisance, not a rule. Optional: event (default PreToolUse),
-flags ("i" for case-insensitive), source, created, note, and `when` — an
-optional gate checked before the pattern, all keys AND-ed:
+flags ("i" for case-insensitive), source, created (defaults to the file's
+mtime date), note, keep (true = never a prune candidate), and `when` — an
+optional gate checked after the pattern, all keys AND-ed:
   files_exist: ["Gemfile"]        any listed file exists at the git toplevel (language/stack check)
-  path_glob:   "app/**/*.rb"      the inspected path (file_path field, or cwd for Bash) matches
+  path_glob:   "app/**/*.rb"      the tool's file_path matches (Edit/Write only; `*` stops at `/`,
+                                  `**` crosses directories)
   branch:      ["main"]           current branch is one of these
   branch_not:  ["main"]           current branch is none of these
 """
 
-import fnmatch
 import json
 import os
 import re
@@ -38,7 +39,9 @@ FIRES = state_dir("rule-fires.json")
 # Heredoc bodies that are data (cat > f <<EOF) must not trip a pattern; bodies
 # fed to a shell interpreter execute and are kept. Same logic as bash-guard.py.
 _HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n\2(?=\n|$)", re.S)
-_SHELL = re.compile(r"\b((ba|z|da)?sh|eval|source)\b")
+# The interpreter must stand as a word of its own (`bash <<EOF`, `sudo sh <<EOF`);
+# `cat > deploy.sh <<EOF` is data even though the filename ends in `sh`.
+_SHELL = re.compile(r"(?:^|[\s;&|(])((?:ba|z|da)?sh|eval|source)(?:\s|$)")
 
 
 def strip_heredocs(cmd):
@@ -88,6 +91,9 @@ def validate(rule):
             for k in when:
                 if k not in WHEN_KEYS:
                     problems.append(f"unknown when key `{k}` (allowed: {', '.join(WHEN_KEYS)})")
+            tools = rule["tool"] if isinstance(rule["tool"], list) else [rule["tool"]]
+            if "path_glob" in when and all(t == "Bash" for t in tools):
+                problems.append("path_glob needs a tool with a file_path (Edit/Write); Bash has none")
     tests = rule["tests"]
     if not isinstance(tests, list):
         problems.append("tests must be a list")
@@ -121,6 +127,8 @@ def load_rules(cwd=None):
                 errors.append(f"{p}: " + "; ".join(probs))
                 continue
             rule["_scope"], rule["_path"] = scope, str(p)
+            if not rule.get("created"):
+                rule["created"] = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc).date().isoformat()
             rule["_untested"] = not is_tested(rule)
             rule["_effective"] = "warn" if rule["_untested"] else rule["action"]
             rules[rule["id"]] = rule
@@ -130,6 +138,11 @@ def load_rules(cwd=None):
 
 def iter_rules(rules):
     return (r for k, r in rules.items() if not k.startswith("_"))
+
+
+def prunable(rule):
+    """Bundled defaults and `keep: true` rules are never prune candidates."""
+    return rule.get("_scope") != "default" and not rule.get("keep")
 
 
 def rule_input(rule, tool_name, tool_input):
@@ -159,6 +172,24 @@ def context(cwd=None):
     return {"cwd": cwd, "top": top, "branch": git(["branch", "--show-current"], cwd) or ""}
 
 
+def _glob_rx(pattern):
+    """Glob → regex with directory-aware semantics: `**` crosses `/`, `*` and `?` do not."""
+    out, i = [], 0
+    while i < len(pattern):
+        c = pattern[i]
+        if pattern.startswith("**/", i):
+            out.append("(?:.*/)?"); i += 3
+        elif pattern.startswith("**", i):
+            out.append(".*"); i += 2
+        elif c == "*":
+            out.append("[^/]*"); i += 1
+        elif c == "?":
+            out.append("[^/]"); i += 1
+        else:
+            out.append(re.escape(c)); i += 1
+    return re.compile("^" + "".join(out) + "$")
+
+
 def _glob_match(path, pattern, top):
     p = path
     if top and os.path.isabs(p):
@@ -166,7 +197,8 @@ def _glob_match(path, pattern, top):
             p = os.path.relpath(p, top)
         except ValueError:
             pass
-    return fnmatch.fnmatch(p, pattern) or fnmatch.fnmatch(path, pattern)
+    rx = _glob_rx(pattern)
+    return bool(rx.match(p) or rx.match(path))
 
 
 def when_ok(rule, tool_input, ctx):
@@ -185,8 +217,7 @@ def when_ok(rule, tool_input, ctx):
         return False
     if "path_glob" in when:
         path = tool_input.get("file_path") if isinstance(tool_input, dict) else None
-        path = path or ctx.get("cwd") or ""
-        if not _glob_match(path, when["path_glob"], ctx.get("top")):
+        if not path or not _glob_match(path, when["path_glob"], ctx.get("top")):
             return False
     return True
 

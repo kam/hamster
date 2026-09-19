@@ -18,7 +18,8 @@ It drops the reasoning: which options were rejected and why, what failed, the us
 constraints. A handoff writes those to disk **while the model still holds them**. A SessionStart
 hook reads them back on `startup`, `resume`, `clear` and `compact`.
 
-Three modes. Default is **write**.
+Three modes. Default is **write**. Installed from a marketplace the skill is `/hamster:handoff`; the
+plain installer names it `/handoff`. The forms below use the short name.
 
 | Mode | Invoke | Does |
 |---|---|---|
@@ -95,8 +96,7 @@ Three modes. Default is **write**.
 
 1. Set `status: done` and `updated`, append the closing audit entry (what shipped, where: PR,
    commit, merged branch). Leave the file for history. The loader ignores `done` files.
-2. **Insert a `sessions` node into Navigator** (NAV-T6c, 2026-09-04) so the session is findable a
-   month later. Skip with a one-line notice when `navigator` is not on `PATH`. Read the project slug
+2. **Insert a `sessions` node into Navigator** so the session is findable a month later. Skip with a one-line notice when `navigator` is not on `PATH`. Read the project slug
    from `.navigator` at the repo root when it exists (`P=$(cat .navigator)`); otherwise omit
    `--project`. Body = a condensed copy of the handoff: goal, decisions with their why, problems
    solved, tried-and-failed, what shipped and where. Paths and URLs only, no diffs or transcript

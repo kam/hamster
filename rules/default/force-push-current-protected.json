@@ -1,0 +1,22 @@
+{
+  "id": "force-push-current-protected",
+  "tool": "Bash",
+  "field": "command",
+  "pattern": "git\\s+push\\b[^\\n;&|]*\\s(?:-f|--force(?:-with-lease)?)\\b(?![^\\n;&|]*\\s\\S+\\s+\\S+)",
+  "action": "block",
+  "message": "A bare `git push --force` while on main/master/production rewrites shared history. Name a feature branch, or push without --force.",
+  "source": "bundled",
+  "created": "2026-09-08",
+  "keep": true,
+  "note": "Companion to force-push-protected: catches `git push --force` with no refspec, gated by the current branch.",
+  "when": {"branch": ["main", "master", "production"]},
+  "tests": [
+    {"input": "git push --force", "expect": "block"},
+    {"input": "git push -f", "expect": "block"},
+    {"input": "git push origin --force", "expect": "block"},
+    {"input": "git push --force-with-lease", "expect": "block"},
+    {"input": "git push --force origin feature/x", "expect": "pass"},
+    {"input": "git push", "expect": "pass"},
+    {"input": "git push -u origin main", "expect": "pass"}
+  ]
+}

@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Install hamster into a plain Claude Code home without a marketplace.
-#   ./install.sh            symlink the checkout to ~/.claude/hamster-plugin (edits apply live)
+#   ./install.sh            symlink the checkout to ~/.claude/hamster-plugin (hook/script edits apply live;
+#                           rerun after editing a command or skill, those are copied)
 #   ./install.sh --copy     copy instead of symlink
 #   ./install.sh --uninstall
 # Skills → ~/.claude/skills/<name>, commands → ~/.claude/commands/hamster-<name>.md,
 # hooks → merged into ~/.claude/settings.json from hooks/hooks.json (backup written first).
+# Skills and commands are COPIED with `${CLAUDE_PLUGIN_ROOT}` and `/hamster:<cmd>` rewritten:
+# Claude Code only sets that variable and namespace for marketplace plugins.
 # Marketplace users don't need this: enable the plugin and Claude Code wires hooks.json itself.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -39,12 +42,15 @@ fi
 mkdir -p "$CLAUDE/skills" "$CLAUDE/commands"
 rm -rf "$ROOT"
 if [ "$MODE" = "--copy" ]; then cp -R "$HERE" "$ROOT"; else ln -s "$HERE" "$ROOT"; fi
+rewrite() { sed -e "s#\${CLAUDE_PLUGIN_ROOT}#$ROOT#g" -e "s#/hamster:\([a-z]*\)#/hamster-\1#g" "$1" > "$2"; }
 for s in "$ROOT"/skills/*/; do
-  n="$(basename "$s")"; rm -rf "$CLAUDE/skills/$n"; ln -s "$ROOT/skills/$n" "$CLAUDE/skills/$n"
+  n="$(basename "$s")"; rm -rf "$CLAUDE/skills/$n"; cp -R "$s" "$CLAUDE/skills/$n"
+  find "$CLAUDE/skills/$n" -name '*.md' | while read -r f; do rewrite "$f" "$f.tmp" && mv "$f.tmp" "$f"; done
 done
 for c in "$ROOT"/commands/*.md; do
-  n="$(basename "$c" .md)"; ln -sf "$ROOT/commands/$n.md" "$CLAUDE/commands/hamster-$n.md"
+  n="$(basename "$c" .md)"; rewrite "$c" "$CLAUDE/commands/hamster-$n.md"
 done
+bash "$ROOT/scripts/install-shims.sh" >/dev/null || true
 
 SETTINGS="$CLAUDE/settings.json"
 [ -f "$SETTINGS" ] && cp "$SETTINGS" "$SETTINGS.bak-hamster-$(date +%Y%m%d%H%M%S)"

@@ -4,15 +4,11 @@ description: Retrospective on the current session — prompting, tooling, contex
 
 You are conducting a retrospective on the **current Claude Code session**. Your goal is to help the user become a more effective collaborator with you, and to help yourself work more efficiently through better skills, memory, and instructions. Be candid and specific — generic advice is useless.
 
-## Step 1 — Usage numbers (optional)
-
-If `~/.claude/scripts/session-stats.py` exists, run it via Bash and show its stdout verbatim first. If it is absent or fails, skip this step in one line and continue — the qualitative review does not depend on it.
-
-## Step 1b — What the loop already knows
+## Step 1 — What the loop already knows
 
 - `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/rules.py list` — rules already enforcing lessons; do not re-propose one.
 - `cat ~/.claude/hamster/session-errors/<session_id>.jsonl 2>/dev/null` — this session's failed tool calls (the `error-retro` hook's source). If the file is absent, use the `is_error` tool results you can see.
-- `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/summarize.py cluster < ~/.claude/hamster/session-errors/<session_id>.jsonl` — free root-cause grouping from the on-device model when built (exit 3 otherwise); treat as a draft.
+- `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/summarize.py cluster < ~/.claude/hamster/session-errors/<session_id>.jsonl` — free root-cause grouping from the local model when one is configured (exit 3 otherwise); treat as a draft.
 - When `navigator` is on PATH: `navigator search "<top error cause>" --type solutions --limit 5` — lessons other projects already paid for.
 
 ## Step 2 — Review the conversation
@@ -78,7 +74,7 @@ Pick exactly ONE target per fix. **First ask: can a hook catch this without the 
 
 - **A rule** (`/hamster:promote`) — deterministic guard with keep-tests; project scope when the lesson is repo-bound, user scope when it travels
 - **A command** (`~/.claude/commands/<name>.md`) — when the fix changes how a slash-command workflow should behave
-- **A skill** (e.g. `~/.claude/skills/fact-checker/SKILL.md`, or a plugin skill like `~/Projects/smile/multiply-plugins/dev-lead/skills/tech-lead/SKILL.md`) — when the fix changes a skill's procedure; name the section to edit
+- **A skill** (`~/.claude/skills/<name>/SKILL.md`, or a plugin's `skills/<name>/SKILL.md`) — when the fix changes a skill's procedure; name the section to edit
 - **An agent** (agent definition file) — when the fix changes how a specific subagent should be prompted or behave
 - **Global CLAUDE.md** (`~/.claude/CLAUDE.md`) — passive cross-project rules
 - **Project CLAUDE.md** (`<cwd>/CLAUDE.md`) — project-specific conventions/gotchas
@@ -117,5 +113,4 @@ Do NOT apply changes that the user did not approve. Do NOT apply changes silentl
 - Do not flatter. If the session was genuinely smooth, a short review is the right answer.
 - Do not propose changes the user explicitly rejected earlier in the same session.
 - Memory writes must follow the format in the auto-memory system prompt: own file with frontmatter, plus one-line index entry in `MEMORY.md`.
-- `~/.claude/scripts/session-stats.py` is a local convenience, not part of this plugin.
 - If you discover the session had no meaningful issues to learn from, say so plainly and skip Step 3.

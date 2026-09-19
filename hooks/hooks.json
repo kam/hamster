@@ -3,7 +3,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|Edit|Write|MultiEdit",
+        "matcher": "Bash|Edit|Write",
         "hooks": [
           {
             "type": "command",
@@ -51,7 +51,7 @@
           {
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/error-retro.py",
-            "timeout": 15
+            "timeout": 30
           }
         ]
       }
@@ -87,7 +87,7 @@
           {
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/handoff-precompact.py",
-            "timeout": 20,
+            "timeout": 30,
             "statusMessage": "Writing handoff auto-snapshot"
           }
         ]

@@ -8,7 +8,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _rules import iter_rules, load_fires, load_rules  # noqa: E402
+from _rules import iter_rules, load_fires, load_rules, prunable  # noqa: E402
 from _store import navigator_search  # noqa: E402
 
 STALE_DAYS = 60
@@ -33,7 +33,7 @@ def main():
             old = datetime.fromisoformat(created).replace(tzinfo=timezone.utc) < cutoff
         except ValueError:
             old = False
-        if old and not rec.get("count"):
+        if old and prunable(r) and not rec.get("count"):
             stale.append(r["id"])
     lines = []
     if active:

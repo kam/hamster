@@ -8,7 +8,7 @@ run ──► fail ──► capture ──► retro ──► lesson ──► 
  └──────────── handoff carries state ─────┘      rule-guard blocks the next repeat
 ```
 
-The premise: a lesson that lives as prose gets forgotten. A lesson that lives as a hook does not. Every rule needs a test that shows it blocks the bad shape and passes the good one; a blocking rule without both runs warn-only. Rules that never fire for 60 days are listed for deletion.
+The premise: a lesson that lives as prose gets forgotten. A lesson that lives as a hook does not. Every rule needs a test that shows it blocks the bad shape and passes the good one; a blocking rule without both runs warn-only. User and project rules that never fire for 60 days are listed for deletion; bundled rules and rules marked `keep: true` are exempt — a hard-safety rule that never fires is doing its job.
 
 ## What you get
 
@@ -28,7 +28,7 @@ The premise: a lesson that lives as prose gets forgotten. A lesson that lives as
 | `/hamster:rules` | command | Fire counts, untested rules, prune candidates (deletion needs your click) |
 | `/hamster:test` | command | Keep-tests for every rule + hook scenario tests |
 | `/hamster:lm` | command | Point the local-model slot at your server; pick fast + quality models |
-| `rules/default/` | bundled | `rm -rf` on root/home, `chmod 777`, force-push to protected branches |
+| `rules/default/` | bundled | `rm -rf` on root/home, `chmod 777`, force-push to protected branches (named, or bare `--force` while on one) |
 
 State lives in `~/.claude/hamster/`. Project rules live in `<repo>/.claude/hamster/rules/` and are meant to be committed.
 
@@ -56,7 +56,7 @@ Optional `when` gate, checked before the pattern (all keys AND-ed):
 "when": {"files_exist": ["Gemfile"], "path_glob": "app/**/*.rb", "branch_not": ["main"]}
 ```
 
-`files_exist` is the stack check (Gemfile = Ruby, Cargo.toml = Rust) — no language list to maintain. `path_glob` scopes Edit/Write rules to a folder; `branch` / `branch_not` relax or tighten by branch.
+`files_exist` is the stack check (Gemfile = Ruby, Cargo.toml = Rust) — no language list to maintain. `path_glob` scopes Edit/Write rules to a folder (`*` stops at `/`, `**` crosses directories; Bash has no path, so `path_glob` is rejected there); `branch` / `branch_not` relax or tighten by branch. `keep: true` exempts a rule from pruning; `created` defaults to the file's date.
 
 `python3 scripts/rules.py add rule.json` validates, runs the tests, and refuses on red. `check Bash "<cmd>"` is a dry run. Heredoc bodies that are data never trip a pattern; bodies piped to a shell do.
 
@@ -66,7 +66,9 @@ When the [`navigator`](https://github.com/kam/navigator) CLI is on `PATH`, hamst
 
 ## Local model (any server, or Apple on-device)
 
-hamster drafts the cheap steps at zero API tokens: the retro's error grouping and lesson draft, the pre-compaction session summary, the "worth remembering?" verdict, and `hamster-lm-ask session|cluster|lesson|nudge|save-session` for skills and other plugins. Order: **your server → Apple on-device (macOS 26+) → the in-session model.**
+hamster drafts the cheap steps at zero API tokens: the retro's error grouping and lesson draft, and the pre-compaction session summary. `hamster-lm-ask session|cluster|lesson|nudge|save-session` exposes the same chain to skills and other plugins (the `nudge` "worth remembering?" verdict and `save-session` JSON are for those callers; hamster itself does not use them). Order: **your server → Apple on-device (macOS 26+) → the in-session model.**
+
+Inside hooks a model call is capped at `HAMSTER_LM_HOOK_TIMEOUT` (8 s) so a cold server falls through instead of eating the hook's budget; the pre-compaction snapshot is written before the summary is attempted.
 
 ```bash
 /hamster:lm                 # probes oMLX :8000, LM Studio :1234, Ollama :11434, llama.cpp :8080; pick a fast + quality model
@@ -74,9 +76,9 @@ python3 scripts/lm.py set --url http://127.0.0.1:1234/v1 --fast <id> --quality <
 scripts/build-native.sh     # optional: compiles native/hamster-lm (Apple Foundation Models) as the zero-setup fallback
 ```
 
-Config lives in `~/.claude/hamster/config.json`. Keys are never stored — only an env var name (`--api-key-env`) or a file reference (`--api-key-file ~/.omlx/settings.json#auth.api_key`). `HAMSTER_LM=0` turns the slot off. Every draft is labelled unverified; the frontier model still corrects it, and rule authoring never goes through a local model.
+`hamster-lm-ask` is linked into `~/.local/bin` by `install.sh`, `/hamster:lm`, or `scripts/install-shims.sh`. Config lives in `~/.claude/hamster/config.json`. Keys are never stored — only an env var name (`--api-key-env`) or a file reference (`--api-key-file ~/.omlx/settings.json#auth.api_key`). `HAMSTER_LM=0` turns the slot off. Every draft is labelled unverified; the frontier model still corrects it, and rule authoring never goes through a local model.
 
-Why two tiers (`evals/haiku-vs-afm/REPORT.md` in kam/claude-settings, Opus blind judge): a Qwen 3.6-35B-A3B MoE gave 16/16 on the yes/no nudge at 0.4 s — as fast as Apple's on-device model, as accurate as Haiku 4.5; a Qwen 3.8-27B dense model beat Haiku 6-0 on session-summary JSON. Apple's on-device model lost every task, so it is the fallback, not the default.
+Why two tiers (author's eval, 2026-09-08, Opus as blind judge): a Qwen 3.6-35B-A3B MoE gave 16/16 on the yes/no nudge at 0.4 s — as fast as Apple's on-device model, as accurate as Haiku 4.5; a Qwen 3.8-27B dense model beat Haiku 6-0 on session-summary JSON. Apple's on-device model lost every task, so it is the fallback, not the default.
 
 ## Install
 
@@ -89,7 +91,11 @@ git clone https://github.com/kam/hamster.git && cd hamster
 ./install.sh            # symlink; --copy to copy; --uninstall to remove
 ```
 
-Requires `python3` and `git`. Restart Claude Code. Commands are then `/hamster-retro`, `/hamster-promote`, `/hamster-rules`, `/hamster-test`, `/handoff`.
+Requires `python3` and `git`. Restart Claude Code. The installer copies commands and skills with the plugin path filled in, so commands are `/hamster-retro`, `/hamster-promote`, `/hamster-rules`, `/hamster-test`, `/hamster-lm`, `/handoff` (the marketplace forms are `/hamster:retro` … and `/hamster:handoff`). Rerun `./install.sh` after editing a command or skill.
+
+## pi
+
+`package.json` is a [pi](https://github.com/earendil-works/pi-coding-agent) package: `pi/extensions/hooks-bridge.ts` replays `hooks/hooks.json` inside pi (PreToolUse, Stop, SessionStart; PostToolUseFailure and PreCompact have no pi equivalent, so the error retro and auto-snapshot are Claude Code only), and `commands/` doubles as the prompt set. Active where `enabledPlugins["hamster@…"]` is true in `.claude/settings.json`.
 
 ## Tests
 

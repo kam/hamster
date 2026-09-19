@@ -36,8 +36,8 @@ from collections import Counter
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _common import has_navigator, memory_dir, state_dir  # noqa: E402
-from _lm import CLUSTER_INSTRUCTIONS, LESSON_INSTRUCTIONS, ask  # noqa: E402
+from _common import git, has_navigator, memory_dir, state_dir  # noqa: E402
+from _lm import CLUSTER_INSTRUCTIONS, HOOK_TIMEOUT, LESSON_INSTRUCTIONS, ask  # noqa: E402
 from _store import existing_lessons  # noqa: E402
 
 THRESHOLD = int(os.environ.get("ERROR_RETRO_THRESHOLD", "8"))
@@ -159,7 +159,9 @@ def main():
         return  # we are the reason Claude continued; don't loop
     session_id = data.get("session_id") or "unknown"
     cwd = data.get("cwd") or os.getcwd()
-    project = os.path.basename(cwd.rstrip("/"))
+    project = os.path.basename(cwd.rstrip("/"))  # display name
+    # ledger key: the git toplevel path, so two repos both named `api` stay distinct
+    project_key = git(["rev-parse", "--show-toplevel"], cwd) or cwd
 
     snippets = errors_from_log(session_id)
     if snippets is None:
@@ -188,7 +190,7 @@ def main():
 
     new_snippets = snippets[seen:]
     ledger = load_ledger()
-    prior = update_ledger(ledger, new_snippets, session_id, project)
+    prior = update_ledger(ledger, new_snippets, session_id, project_key)
     try:
         save_ledger(ledger)
     except OSError:
@@ -233,9 +235,9 @@ def main():
 
     local = ""
     err_text = "\n".join(f"- {s}" for s, _ in counts.most_common(MAX_SNIPPETS))
-    groups = ask(err_text, CLUSTER_INSTRUCTIONS, 250, tier="quality")
+    groups = ask(err_text, CLUSTER_INSTRUCTIONS, 250, tier="quality", timeout=HOOK_TIMEOUT)
     if groups:
-        draft = ask(groups, LESSON_INSTRUCTIONS, 150, tier="quality") or ""
+        draft = ask(groups, LESSON_INSTRUCTIONS, 150, tier="quality", timeout=HOOK_TIMEOUT) or ""
         local = ("Local draft from the local model (zero tokens; verify before saving, "
                  "it does not know the repo):\n" + groups + ("\n" + draft if draft else "") + "\n")
 

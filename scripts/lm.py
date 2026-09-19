@@ -85,6 +85,7 @@ def cmd_show(a):
 
 
 def cmd_test(a):
+    _lm._check_save({})  # fresh probe: a stale "down" mark must not fake the result
     for tier, prompt in (("fast", "Answer YES or NO: is 2+2 equal to 4?"),
                          ("quality", "In one sentence, what does a PreToolUse hook do in Claude Code?")):
         out = _lm.ask(prompt, "Answer briefly.", 60, tier=tier)

@@ -6,7 +6,7 @@
   rules.py add <file.json> [--scope user|project] [--force]
                                       validate + run tests, then install (refuses on red)
   rules.py check <tool> <input>       dry-run: which rules fire on this input
-  rules.py prune [--days 60] [--json] rules created >= N days ago with zero fires
+  rules.py prune [--days 60] [--json] user/project rules created >= N days ago with zero fires (defaults and keep:true exempt)
   rules.py rm <id>                    delete a user/project rule file (never default)
 """
 import argparse
@@ -25,6 +25,7 @@ from _rules import (  # noqa: E402
     iter_rules,
     load_fires,
     load_rules,
+    prunable,
     rule_dirs,
     run_tests,
     validate,
@@ -135,8 +136,9 @@ def cmd_add(args):
 
 def cmd_check(args):
     field = "command" if args.tool == "Bash" else args.field
-    hits = evaluate(load_rules(), args.tool, {field: args.input})
-    gated = [r["id"] for r in iter_rules(load_rules()) if r.get("when")]
+    rules = load_rules()
+    hits = evaluate(rules, args.tool, {field: args.input})
+    gated = [r["id"] for r in iter_rules(rules) if r.get("when")]
     if gated:
         print(f"(when-gated rules evaluated against this cwd/branch: {', '.join(gated)})")
     if not hits:
@@ -153,6 +155,8 @@ def cmd_prune(args):
     cutoff = datetime.now(timezone.utc) - timedelta(days=args.days)
     out = []
     for r in iter_rules(rules):
+        if not prunable(r):
+            continue
         try:
             created = datetime.fromisoformat(r.get("created", "")).replace(tzinfo=timezone.utc)
         except ValueError:

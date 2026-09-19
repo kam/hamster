@@ -22,11 +22,10 @@ Env: MEMORY_PRUNE=0 disables. Fails open.
 """
 import json
 import os
-import re
 import sys
 from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _common import memory_dir, state_dir  # noqa: E402
+from _common import frontmatter, memory_dir, state_dir  # noqa: E402
 
 MARKER_DIR = state_dir("session-errors")
 MARKER_MAX_AGE_DAYS = 30
@@ -49,11 +48,6 @@ def sweep_markers(now):
         except OSError:
             continue
     return removed
-
-
-def frontmatter(text):
-    m = re.match(r"^---\s*\n(.*?)\n---\s*\n", text, re.S)
-    return m.group(1) if m else ""
 
 
 def parse_date(s):
@@ -87,14 +81,10 @@ def main():
         except OSError:
             continue
         fm = frontmatter(text)
-        m = re.search(r"^\s*decay_days:\s*(\d+)", fm, re.M)
-        if not m:
+        if not str(fm.get("decay_days", "")).isdigit():
             continue
-        decay = int(m.group(1))
-        stamp = None
-        mm = re.search(r"^\s*modified:\s*(.+)$", fm, re.M)
-        if mm:
-            stamp = parse_date(mm.group(1))
+        decay = int(fm["decay_days"])
+        stamp = parse_date(fm["modified"]) if fm.get("modified") else None
         if stamp is None:
             stamp = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
         if (now - stamp).days < decay:
