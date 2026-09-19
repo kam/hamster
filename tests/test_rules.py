@@ -194,10 +194,23 @@ def test_heredoc_to_sh_named_file_is_data(env):
     assert r.returncode == 2
 
 
+@pytest.mark.parametrize("head", ["/bin/bash <<'EOF'", "sudo /bin/sh <<EOF", "bash<<EOF", "cat <<EOF | sh",
+                                  "cat <<'EOF' | sudo bash -s"])
+def test_heredoc_fed_to_a_shell_is_code(env, head):
+    """The interpreter may be a path, glued to `<<`, or sit after the marker behind a pipe."""
+    assert guard("Bash", {"command": f"{head}\nchmod 777 /srv\nEOF"}).returncode == 2, head
+
+
+def test_heredoc_redirected_after_marker_is_data(env):
+    assert guard("Bash", {"command": "cat <<'EOF' > bin/deploy.sh\nchmod 777 /srv\nEOF"}).returncode == 0
+
+
 def test_default_rule_coverage(env):
-    for cmd in ("rm -rf ~/", 'rm -rf "$HOME"', "rm -rf $HOME/", "git push origin +main", "chmod a=rwx x"):
+    for cmd in ("rm -rf ~/", 'rm -rf "$HOME"', "rm -rf $HOME/", "git push origin +main",
+                "git push origin +HEAD:main", "chmod a=rwx x"):
         assert guard("Bash", {"command": cmd}).returncode == 2, cmd
-    for cmd in ("rm -rf ~/.cache/x", 'rm -rf "$HOME/tmp"', "git push origin +feature/x"):
+    for cmd in ("rm -rf ~/.cache/x", 'rm -rf "$HOME/tmp"', "git push origin +feature/x",
+                "git push origin +main:feature/x"):
         assert guard("Bash", {"command": cmd}).returncode == 0, cmd
 
 

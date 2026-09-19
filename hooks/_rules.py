@@ -39,15 +39,16 @@ FIRES = state_dir("rule-fires.json")
 # Heredoc bodies that are data (cat > f <<EOF) must not trip a pattern; bodies
 # fed to a shell interpreter execute and are kept. Same logic as bash-guard.py.
 _HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n\2(?=\n|$)", re.S)
-# The interpreter must stand as a word of its own (`bash <<EOF`, `sudo sh <<EOF`);
-# `cat > deploy.sh <<EOF` is data even though the filename ends in `sh`.
-_SHELL = re.compile(r"(?:^|[\s;&|(])((?:ba|z|da)?sh|eval|source)(?:\s|$)")
+# The interpreter must stand as a word of its own, bare or by path (`bash <<EOF`,
+# `sudo /bin/sh <<EOF`); `cat > deploy.sh <<EOF` is data even though the filename ends in `sh`.
+_SHELL = re.compile(r"(?:^|[\s;&|(/])((?:ba|z|da)?sh|eval|source)(?:\s|$)")
 
 
 def strip_heredocs(cmd):
     def repl(m):
         line_start = cmd.rfind("\n", 0, m.start()) + 1
-        if _SHELL.search(cmd[line_start : m.start()]):
+        tail = cmd[m.end(2) + len(m.group(1)) : m.start(3)]  # after the marker: `<<EOF | sh`
+        if _SHELL.search(cmd[line_start : m.start()]) or _SHELL.search(tail):
             return m.group(0)
         return m.group(0)[: m.start(3) - m.start()] + "\n" + m.group(2)
 

@@ -146,6 +146,32 @@ def test_one_bad_reply_does_not_mark_server_down(env, server):
     srv.shutdown()
 
 
+def test_hook_timeout_is_a_budget_for_the_whole_ask(env, monkeypatch):
+    """Retry and on-device fallback share the caller's seconds; they do not each get their own."""
+    lm = load("_lm")
+    write_cfg(env, {"url": "http://127.0.0.1:9/v1", "models": {"quality": "x"}})
+    clock = [100.0]
+    given = []
+
+    def slow_http(url, key, body=None, timeout=None):
+        given.append(timeout)
+        clock[0] += timeout  # every call burns all the time it was allowed
+        raise OSError("no reply")
+
+    monkeypatch.setattr(lm.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(lm.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+    monkeypatch.setattr(lm, "_http", slow_http)
+    monkeypatch.setattr(lm, "server_ok", lambda server: True)
+    monkeypatch.setattr(lm, "server_models", lambda url, key=None, timeout=4: ["x"])
+    monkeypatch.setattr(lm, "afm_available", lambda: True)
+    monkeypatch.setattr(lm, "afm_ask", lambda *a: given.append(("afm", a[-1])))
+    assert lm.ask("q", "i", 20, timeout=8) is None
+    assert given == [8]  # one attempt used the budget: no retry, no fallback
+    given.clear()
+    assert lm.server_ask({"url": "http://127.0.0.1:9/v1", "models": {"quality": "x"}}, "q", "i", 20, "quality") is None
+    assert given == [lm.TIMEOUT, lm.TIMEOUT]  # CLI path unchanged: full timeout per attempt
+
+
 def test_hook_timeout_is_passed_and_snapshot_survives_slow_server(env, tmp_path):
     """A server that never answers must not cost the pre-compaction snapshot."""
     import socket

@@ -2,7 +2,7 @@
   "id": "force-push-protected",
   "tool": "Bash",
   "field": "command",
-  "pattern": "git\\s+push\\b(?:(?=[^\\n;&|]*\\s(?:-f|--force(?:-with-lease)?)\\b)[^\\n;&|]*\\s(?:\\S+\\s+)?(?:\\+?(?:main|master|production)|\\S+:(?:main|master|production))|[^\\n;&|]*\\s(?:\\S+\\s+)?\\+(?:main|master|production))(?:\\s|$)",
+  "pattern": "git\\s+push\\b(?:(?=[^\\n;&|]*\\s(?:-f|--force(?:-with-lease)?)\\b)[^\\n;&|]*\\s(?:\\S+\\s+)?(?:\\+?(?:main|master|production)|\\S+:(?:main|master|production))|[^\\n;&|]*\\s(?:\\S+\\s+)?\\+(?:\\S+:)?(?:main|master|production))(?:\\s|$)",
   "action": "block",
   "message": "Force-push to main/master/production rewrites shared history. Push a branch and open a PR.",
   "source": "bundled",
@@ -14,9 +14,11 @@
     {"input": "git push origin --force-with-lease production", "expect": "block"},
     {"input": "git push --force origin HEAD:main", "expect": "block"},
     {"input": "git push origin +main", "expect": "block"},
+    {"input": "git push origin +HEAD:main", "expect": "block"},
     {"input": "git push --force origin feature/x", "expect": "pass"},
     {"input": "git push origin main", "expect": "pass"},
     {"input": "git push -u origin main", "expect": "pass"},
-    {"input": "git push origin +feature/x", "expect": "pass"}
+    {"input": "git push origin +feature/x", "expect": "pass"},
+    {"input": "git push origin +main:feature/x", "expect": "pass"}
   ]
 }

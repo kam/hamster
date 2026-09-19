@@ -142,7 +142,9 @@ def server_ok(server):
 
 
 def server_ask(server, prompt, instructions, max_tokens, tier, timeout=None):
-    timeout = timeout or TIMEOUT
+    """`timeout` given (a hook) is a budget for the whole call, retry included;
+    omitted (CLI, skills) each attempt gets TIMEOUT."""
+    deadline = time.monotonic() + timeout if timeout else None
     model = (server.get("models") or {}).get(tier) or (server.get("models") or {}).get("quality")
     if not model:
         return None
@@ -157,12 +159,15 @@ def server_ask(server, prompt, instructions, max_tokens, tier, timeout=None):
     key = resolve_key(server)
     text = None
     for attempt in (1, 2):  # one retry: a server that just (re)loaded a model can 5xx once
+        left = TIMEOUT if deadline is None else deadline - time.monotonic()
+        if left < 1:
+            break
         try:
-            d = _http(server["url"].rstrip("/") + "/chat/completions", key, body, timeout)
+            d = _http(server["url"].rstrip("/") + "/chat/completions", key, body, left)
             text = d["choices"][0]["message"]["content"]
             break
         except Exception:
-            if attempt == 1:
+            if attempt == 1 and (deadline is None or deadline - time.monotonic() > 2.5):
                 time.sleep(1.5)
     if text is None:
         # mark the server down only when it is really gone; a bad reply with a live
@@ -243,14 +248,20 @@ def available():
 
 def ask(prompt, instructions=None, max_tokens=400, tier="quality", timeout=None):
     """Reply text, or None when no local model is usable. Never raises.
-    `timeout` (seconds) caps one model call; hooks pass HOOK_TIMEOUT."""
+    `timeout` (seconds) is a budget for the whole ask — server, its retry and
+    the on-device fallback together; hooks pass HOOK_TIMEOUT."""
     if not prompt or os.environ.get("HAMSTER_LM") == "0":
         return None
+    deadline = time.monotonic() + timeout if timeout else None
     server = load_config().get("lm", {}).get("server")
     if server and server_ok(server):
         out = server_ask(server, prompt, instructions, max_tokens, tier, timeout)
         if out:
             return out
+    if deadline is not None:
+        timeout = deadline - time.monotonic()
+        if timeout < 1:
+            return None
     if afm_available():
         return afm_ask(prompt, instructions, max_tokens, timeout)
     return None
