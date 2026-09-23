@@ -114,3 +114,16 @@ def test_last_call_reads_past_a_huge_trailing_line(env):
     with open(main, "a") as fh:
         fh.write(json.dumps({"type": "user", "message": {"content": "x" * 600000}}) + "\n")
     assert last_call(main)[0] == 150005
+
+
+@pytest.mark.parametrize("model, price", [
+    ("claude-opus-5-5", 5.0),
+    ("claude-opus-5", 6.25),
+    ("claude-fable-5-1", 12.5),
+    ("", 6.25),
+])
+def test_write_price_per_model(model, price):
+    sys.path.insert(0, str(ROOT / "hooks"))
+    from _cache import write_price
+
+    assert write_price(model) == price

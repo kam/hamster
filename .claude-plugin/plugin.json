@@ -1,6 +1,6 @@
 {
   "name": "hamster",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "The wheel: a self-learning loop for Claude Code — capture tool failures, run a one-step retro, keep a handoff across compaction, and promote lessons into deterministic hook rules with keep-tests that are pruned when they stop firing. Navigator-aware, auto-memory fallback.",
   "author": {
     "name": "Khamsouk Souvanlasy",

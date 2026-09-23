@@ -15,7 +15,8 @@ from _common import state_dir
 RETRY_WINDOW_S = 600
 
 # $/M cache-write tokens, list price. First substring match wins.
-WRITE_PRICE = {"fable": 12.5, "opus": 6.25, "sonnet": 2.5, "haiku": 1.25}
+WRITE_PRICE = {"fable": 12.5, "opus-5-5": 5.0, "opus": 6.25, "sonnet": 2.5,
+               "haiku": 1.25}
 _TAIL_STEPS = (400_000, 4_000_000)  # one image line can exceed the first window
 
 
