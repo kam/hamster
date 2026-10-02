@@ -45,7 +45,7 @@ tasks_file: <docs/prd/<name>.tasks.md, or omit>
 
 1. **<The one executable next action>**
 2. <then>
-3. <then, or "then `/standup`" when the repo has a `.navigator`>
+3. <then, or "then `/hamster:standup`" when the repo has a `.navigator`>
 
 ## Artifacts (paths and URLs only)
 

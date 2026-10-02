@@ -23,6 +23,7 @@ The premise: a lesson that lives as prose gets forgotten. A lesson that lives as
 | `hooks/memory-prune.py` | SessionStart | Archives auto-memory files whose `decay_days` elapsed; sweeps old markers |
 | `hooks/handoff-load.py` / `handoff-precompact.py` | SessionStart / PreCompact | The [claude-handoff](https://github.com/kam/claude-handoff) pair, now bundled |
 | `skills/handoff` | `/handoff`, `/handoff resume`, `/handoff done` | Durable session state instead of lossy compaction |
+| `/hamster:standup` | command | Where things stand: open Navigator tasks by status, the next one to pick up, what waits on humans. Read-only; handoff + git log without Navigator |
 | `/hamster:retro` | command | Manual retrospective; routes each fix to rule / skill / CLAUDE.md / memory / Navigator |
 | `/hamster:promote <lesson>` | command | Drafts a rule + tests from a memory, Navigator node or text; installs only when green |
 | `/hamster:rules` | command | Fire counts, untested rules, prune candidates (deletion needs your click) |
@@ -64,6 +65,8 @@ Optional `when` gate, checked before the pattern (all keys AND-ed):
 
 When the [`navigator`](https://github.com/kam/navigator) CLI is on `PATH`, hamster reads and writes cross-project lessons as `solutions` nodes and session records as `sessions` nodes: the retro lists matching solutions as "already recorded", `/handoff done` files a session node, `/hamster:promote` back-links the node with `promoted_to`, and session start shows this repo's earlier lessons. Without it everything falls back to Claude Code auto-memory. Nothing writes the vault markdown directly.
 
+`/hamster:standup` reads the repo's `task` nodes to orient a session and writes none: hamster owns session state and lessons, not work state. Claiming a task belongs to the workflow that gates the work (dev-lead's `/next-task` in a code repo); elsewhere the stand-up prints the one `navigator update` line and leaves it to you.
+
 ## Local model (any server, or Apple on-device)
 
 hamster drafts the cheap steps at zero API tokens: the retro's error grouping and lesson draft, and the pre-compaction session summary. `hamster-lm-ask session|cluster|lesson|nudge|save-session` exposes the same chain to skills and other plugins (the `nudge` "worth remembering?" verdict and `save-session` JSON are for those callers; hamster itself does not use them). Order: **your server → Apple on-device (macOS 26+) → the in-session model.**
@@ -91,7 +94,7 @@ git clone https://github.com/kam/hamster.git && cd hamster
 ./install.sh            # symlink; --copy to copy; --uninstall to remove
 ```
 
-Requires `python3` and `git`. Restart Claude Code. The installer copies commands and skills with the plugin path filled in, so commands are `/hamster-retro`, `/hamster-promote`, `/hamster-rules`, `/hamster-test`, `/hamster-lm`, `/handoff` (the marketplace forms are `/hamster:retro` … and `/hamster:handoff`). Rerun `./install.sh` after editing a command or skill.
+Requires `python3` and `git`. Restart Claude Code. The installer copies commands and skills with the plugin path filled in, so commands are `/hamster-standup`, `/hamster-retro`, `/hamster-promote`, `/hamster-rules`, `/hamster-test`, `/hamster-lm`, `/handoff` (the marketplace forms are `/hamster:standup` … and `/hamster:handoff`). Rerun `./install.sh` after editing a command or skill.
 
 ## pi
 

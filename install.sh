@@ -69,4 +69,4 @@ for ev, entries in spec.items():
         h.setdefault(ev, []).append(entry)
 p.write_text(json.dumps(d, indent=2) + "\n")
 PY
-echo "Installed ($MODE) at $ROOT. Restart Claude Code. Commands: /hamster-retro, /hamster-promote, /hamster-rules, /hamster-test, /handoff."
+echo "Installed ($MODE) at $ROOT. Restart Claude Code. Commands: /hamster-standup, /hamster-retro, /hamster-promote, /hamster-rules, /hamster-test, /handoff."
