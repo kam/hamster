@@ -14,17 +14,20 @@ from _common import state_dir
 
 RETRY_WINDOW_S = 600
 
-# $/M cache-write tokens, list price. First substring match wins.
+# $/M 5-minute cache-write tokens, list price. First substring match wins.
 WRITE_PRICE = {"fable": 12.5, "opus-5-5": 5.0, "opus": 6.25, "sonnet": 2.5,
-               "haiku": 1.25}
+               "haiku-5-5": 0.125, "haiku": 1.25}
+# Haiku 5.5 bills a prompt over 100k tokens at 5x (cache write $0.625/M).
+TIERED = {"haiku-5-5": (100_000, 0.625)}
 _TAIL_STEPS = (400_000, 4_000_000)  # one image line can exceed the first window
 
 
-def write_price(model):
+def write_price(model, tokens=0):
     model = model or ""
     for key, price in WRITE_PRICE.items():
         if key in model:
-            return price
+            cut, over = TIERED.get(key, (None, price))
+            return over if cut is not None and tokens > cut else price
     return WRITE_PRICE["opus"]
 
 
@@ -97,4 +100,4 @@ def cold(path, idle_seconds, min_tokens):
     idle = (dt.datetime.now(dt.timezone.utc) - stamp).total_seconds()
     if idle < idle_seconds or tokens < min_tokens:
         return None
-    return tokens, int(idle // 60), tokens * write_price(model) / 1e6
+    return tokens, int(idle // 60), tokens * write_price(model, tokens) / 1e6

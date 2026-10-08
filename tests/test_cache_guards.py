@@ -120,6 +120,8 @@ def test_last_call_reads_past_a_huge_trailing_line(env):
     ("claude-opus-5-5", 5.0),
     ("claude-opus-5", 6.25),
     ("claude-fable-5-1", 12.5),
+    ("claude-haiku-5-5", 0.125),
+    ("claude-haiku-4-5", 1.25),
     ("", 6.25),
 ])
 def test_write_price_per_model(model, price):
@@ -127,3 +129,12 @@ def test_write_price_per_model(model, price):
     from _cache import write_price
 
     assert write_price(model) == price
+
+
+def test_write_price_haiku_5_5_long_prompt_tier():
+    sys.path.insert(0, str(ROOT / "hooks"))
+    from _cache import write_price
+
+    assert write_price("claude-haiku-5-5", 100_000) == 0.125
+    assert write_price("claude-haiku-5-5", 150_000) == 0.625
+    assert write_price("claude-opus-5-5", 150_000) == 5.0
