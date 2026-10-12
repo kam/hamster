@@ -30,6 +30,7 @@ model lost every task. Hence server first, AFM as the zero-setup fallback.
 """
 
 import json
+import math
 import os
 import re
 import shutil
@@ -283,15 +284,30 @@ def server_decide(server, state, questions, timeout=None):
         d = _http(server["url"].rstrip("/") + "/systemone", resolve_key(server), body, timeout or TIMEOUT)
     except Exception:
         return None
-    return d.get("answers") or None
+    answers = d.get("answers") if isinstance(d, dict) else None
+    return answers if isinstance(answers, dict) and answers else None
+
+
+def noul(answers, name):
+    """The yes-probability of `noul` question `name`, or None unless it is a finite number in [0, 1]."""
+    a = (answers or {}).get(name)
+    p = a.get("noul") if isinstance(a, dict) else None
+    if isinstance(p, bool) or not isinstance(p, (int, float)) or not math.isfinite(p) or not 0 <= p <= 1:
+        return None
+    return float(p)
+
+
+def _left(deadline):
+    return None if deadline is None else deadline - time.monotonic()
 
 
 def nudge(text, timeout=None):
-    """'YES: <topic>', 'YES', 'NO', or None when no local model is usable.
+    """'YES: <topic>', 'YES', 'NO', or None when no local model is usable. Never raises.
 
     With a decision model configured, it makes the yes/no call (a `noul` probability against
     NUDGE_THRESHOLD) and the fast tier writes the topic only after a yes. Otherwise, or when
-    the decision call fails, one generative call does both, as before.
+    the decision call fails, one generative call does both, as before. `timeout` budgets the
+    whole call, the /models probe, the decision call, the topic and any fallback included.
     Measured 2026-10-12 (~/.claude/evals/clef-decision): Clef-flash 16/16 at 0.16 s, yes cases
     0.60–0.91 and no cases 0.02–0.09; Qwen 3.6-35B-A3B wrote a specific topic on 8/8 yes
     cases at 0.39 s, Apple's model on 6/8 (one empty, several vague)."""
@@ -300,17 +316,26 @@ def nudge(text, timeout=None):
     deadline = time.monotonic() + timeout if timeout else None
     server = load_config().get("lm", {}).get("server")
     if server and (server.get("models") or {}).get("decision") and server_ok(server):
-        answers = server_decide(server, {"passage": text[-INPUT_CHARS_SERVER:]},
-                                {"keep": {"type": "noul", "instructions": NUDGE_QUESTION}}, timeout)
-        p = ((answers or {}).get("keep") or {}).get("noul")
-        if isinstance(p, (int, float)):
+        left = _left(deadline)
+        if left is not None and left < 1:
+            return None
+        p = noul(server_decide(server, {"passage": text[-INPUT_CHARS_SERVER:]},
+                               {"keep": {"type": "noul", "instructions": NUDGE_QUESTION}}, left), "keep")
+        if p is not None:
             if p < NUDGE_THRESHOLD:
                 return "NO"
-            left = None if deadline is None else deadline - time.monotonic()
-            topic = ask(text, TOPIC_INSTRUCTIONS, 40, tier="fast", timeout=left) if left is None or left >= 1 else None
+            left = _left(deadline)
+            topic = None
+            if left is None or left >= 1:
+                topic = ask(text, TOPIC_INSTRUCTIONS, 40, tier="fast", timeout=left)
             topic = re.sub(r"^(yes|topic)\s*:\s*", "", (topic or "").strip().split("\n")[0], flags=re.I).strip(" .\"'`")
+            if re.fullmatch(r"(yes|no)", topic, flags=re.I):
+                topic = ""
             return f"YES: {topic}" if topic else "YES"
-    return ask(text, NUDGE_INSTRUCTIONS, 40, tier="fast", timeout=timeout)
+    left = _left(deadline)
+    if left is not None and left < 1:
+        return None
+    return ask(text, NUDGE_INSTRUCTIONS, 40, tier="fast", timeout=left)
 
 
 # Prompts the hooks and commands share, so a phrasing fix lands everywhere.

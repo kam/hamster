@@ -26,6 +26,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     key = None
     calls = []
     noul = None  # decision-model probability; None → /systemone answers 404
+    raw = None   # verbatim /systemone body, overrides noul
 
     def _auth(self):
         if self.key and self.headers.get("Authorization") != f"Bearer {self.key}":
@@ -46,9 +47,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         req = json.loads(self.rfile.read(n))
         Handler.calls.append(req)
         if self.path.endswith("/systemone"):
-            if Handler.noul is None:
+            if Handler.raw is not None:
+                body = Handler.raw.encode()
+            elif Handler.noul is None:
                 self.send_response(404); self.end_headers(); return
-            body = json.dumps({"model": req["model"], "answers": {"keep": {"type": "noul", "noul": Handler.noul}}}).encode()
+            else:
+                body = json.dumps({"model": req["model"], "answers": {"keep": {"type": "noul", "noul": Handler.noul}}}).encode()
             self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
             self.wfile.write(body)
             return
@@ -65,7 +69,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def server():
     srv = http.server.HTTPServer(("127.0.0.1", 0), Handler)
     t = threading.Thread(target=srv.serve_forever, daemon=True); t.start()
-    Handler.calls = []; Handler.key = None; Handler.noul = None
+    Handler.calls = []; Handler.key = None; Handler.noul = None; Handler.raw = None
     yield f"http://127.0.0.1:{srv.server_port}/v1"
     srv.shutdown()
 
@@ -128,7 +132,42 @@ def test_nudge_decision_failure_falls_back_to_generative(env, server):
     write_cfg(env, {"url": server, "models": DECIDE})
     lm = load("_lm")
     assert lm.nudge("text") == "REPLY from small-1b"
+    assert len(Handler.calls) == 2 and Handler.calls[0]["model"] == "clef-flash"
+    assert Handler.calls[1]["messages"][0]["content"] == lm.NUDGE_INSTRUCTIONS
+
+
+@pytest.mark.parametrize("raw", [
+    "[1]", '{"answers": [1]}', '{"answers": {"keep": "s"}}', '{"answers": {"keep": {}}}',
+    '{"answers": {"keep": {"noul": "0.9"}}}', '{"answers": {"keep": {"noul": true}}}',
+    '{"answers": {"keep": {"noul": NaN}}}', '{"answers": {"keep": {"noul": 5}}}', "not json",
+])
+def test_nudge_malformed_decision_reply_falls_back(env, server, raw):
+    Handler.raw = raw
+    write_cfg(env, {"url": server, "models": DECIDE})
+    lm = load("_lm")
+    assert lm.nudge("text") == "REPLY from small-1b"
     assert Handler.calls[-1]["messages"][0]["content"] == lm.NUDGE_INSTRUCTIONS
+
+
+def test_nudge_threshold_is_inclusive(env, server):
+    Handler.noul = 0.4
+    write_cfg(env, {"url": server, "models": DECIDE})
+    assert load("_lm").nudge("text").startswith("YES")
+
+
+def test_nudge_spent_budget_returns_none(env, server, monkeypatch):
+    Handler.noul = None
+    write_cfg(env, {"url": server, "models": DECIDE})
+    lm = load("_lm")
+    real = lm.server_decide
+    monkeypatch.setattr(lm, "server_decide", lambda *a: (time.sleep(1.2), real(*a))[1])
+    assert lm.nudge("text", timeout=2) is None  # no second full budget for the fallback
+
+
+def test_nudge_cli_exit_3_without_a_model(env):
+    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "summarize.py"), "nudge"], input="text",
+                       capture_output=True, text=True, env=os.environ)
+    assert r.returncode == 3
 
 
 def test_key_from_file_ref(env, server, tmp_path):
