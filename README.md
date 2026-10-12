@@ -81,6 +81,8 @@ scripts/build-native.sh     # optional: compiles native/hamster-lm (Apple Founda
 
 `hamster-lm-ask` is linked into `~/.local/bin` by `install.sh`, `/hamster:lm`, or `scripts/install-shims.sh`. Config lives in `~/.claude/hamster/config.json`. Keys are never stored — only an env var name (`--api-key-env`) or a file reference (`--api-key-file ~/.omlx/settings.json#auth.api_key`). `HAMSTER_LM=0` turns the slot off. Every draft is labelled unverified; the frontier model still corrects it, and rule authoring never goes through a local model.
 
+**Optional decision model for `nudge`.** On oMLX 0.7.1+, add `"decision": "<id>"` (for example `Jundot--clef-flash-oQ4e`) to `server.models` by hand. Decision models are hidden from `/models`, so `lm.py set` cannot validate the id. With it set, the decision model answers the yes/no at `POST /v1/systemone` (a probability against 0.4) and the fast tier writes the topic only after a yes. Any failure falls back to the single generative call. The CLI budgets the whole chain at `HAMSTER_NUDGE_TIMEOUT` (7 s), under the memory-vault Stop hook's 8 s kill. Author's eval, 2026-10-12: Clef-flash 16/16 at 0.16 s; the 35B wrote a specific topic on 8/8 yes cases.
+
 Why two tiers (author's eval, 2026-09-08, Opus as blind judge): a Qwen 3.6-35B-A3B MoE gave 16/16 on the yes/no nudge at 0.4 s — as fast as Apple's on-device model, as accurate as Haiku 4.5; a Qwen 3.8-27B dense model beat Haiku 6-0 on session-summary JSON. Apple's on-device model lost every task, so it is the fallback, not the default.
 
 ## Install

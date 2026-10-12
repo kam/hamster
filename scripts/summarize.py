@@ -6,6 +6,7 @@ Exit 0 with the draft on stdout; exit 3 with a one-line notice when no local
 model is available (the caller then writes the summary itself). Used by
 /handoff done, /hamster:retro and the handoff skill; safe to call blind.
 """
+import os
 import sys
 from pathlib import Path
 
@@ -18,13 +19,14 @@ from _lm import (  # noqa: E402
     SESSION_INSTRUCTIONS,
     ask,
     available,
+    nudge,
 )
 
 MODES = {  # mode: (instructions, max_tokens, tier)
     "session": (SESSION_INSTRUCTIONS, 700, "quality"),
     "cluster": (CLUSTER_INSTRUCTIONS, 250, "quality"),
     "lesson": (LESSON_INSTRUCTIONS, 150, "quality"),
-    "nudge": (NUDGE_INSTRUCTIONS, 40, "fast"),
+    "nudge": (NUDGE_INSTRUCTIONS, 40, "fast"),  # unused: nudge mode goes through _lm.nudge
     "save-session": (SAVE_SESSION_INSTRUCTIONS, 400, "quality"),
 }
 
@@ -37,7 +39,13 @@ def main():
         print("no local model (run `/hamster:lm` to point at a server, or build native/hamster-lm on macOS 26+); write the summary yourself")
         return 3
     instructions, max_tokens, tier = MODES[sys.argv[1]]
-    out = ask(sys.stdin.read(), instructions, max_tokens, tier=tier)
+    text = sys.stdin.read()
+    # nudge: decision model first when configured (`_lm.nudge`), same YES/NO output
+    if sys.argv[1] == "nudge":
+        # the memory-vault Stop hook kills this process at 8 s; budget the chain under that
+        out = nudge(text, timeout=float(os.environ.get("HAMSTER_NUDGE_TIMEOUT", "7")))
+    else:
+        out = ask(text, instructions, max_tokens, tier=tier)
     if not out:
         print("local model returned nothing; write the summary yourself")
         return 3
