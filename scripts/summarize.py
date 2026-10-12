@@ -18,6 +18,7 @@ from _lm import (  # noqa: E402
     SESSION_INSTRUCTIONS,
     ask,
     available,
+    nudge,
 )
 
 MODES = {  # mode: (instructions, max_tokens, tier)
@@ -37,7 +38,9 @@ def main():
         print("no local model (run `/hamster:lm` to point at a server, or build native/hamster-lm on macOS 26+); write the summary yourself")
         return 3
     instructions, max_tokens, tier = MODES[sys.argv[1]]
-    out = ask(sys.stdin.read(), instructions, max_tokens, tier=tier)
+    text = sys.stdin.read()
+    # nudge: decision model first when configured (`_lm.nudge`), same YES/NO output
+    out = nudge(text) if sys.argv[1] == "nudge" else ask(text, instructions, max_tokens, tier=tier)
     if not out:
         print("local model returned nothing; write the summary yourself")
         return 3

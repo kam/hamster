@@ -10,7 +10,8 @@ Config: ~/.claude/hamster/config.json (HAMSTER_STATE overrides the dir):
      "server": {"url": "http://127.0.0.1:8000/v1",
                 "api_key_env": "OMLX_API_KEY",            # or
                 "api_key_file": "~/.omlx/settings.json#auth.api_key",
-                "models": {"fast": "<id>", "quality": "<id>"},
+                "models": {"fast": "<id>", "quality": "<id>",
+                           "decision": "<id>"},             # optional, see server_decide
                 "extra": {"chat_template_kwargs": {"enable_thinking": false}}},
      "afm": true }}
 
@@ -267,6 +268,51 @@ def ask(prompt, instructions=None, max_tokens=400, tier="quality", timeout=None)
     return None
 
 
+def server_decide(server, state, questions, timeout=None):
+    """Answers from the decision model named by `models.decision`, or None.
+
+    oMLX 0.7.1+ serves decision models (Clef, OpenJev) at <url>/systemone in the TypeSafe
+    System One format: typed questions in, one probability per option out, no text. They
+    are hidden from /models, so `lm.py set` cannot validate the id; write it by hand.
+    `truncate: false` makes an over-long state fail loudly instead of being trimmed."""
+    model = (server.get("models") or {}).get("decision")
+    if not model:
+        return None
+    body = {"model": model, "state": state, "questions": questions, "truncate": False}
+    try:
+        d = _http(server["url"].rstrip("/") + "/systemone", resolve_key(server), body, timeout or TIMEOUT)
+    except Exception:
+        return None
+    return d.get("answers") or None
+
+
+def nudge(text, timeout=None):
+    """'YES: <topic>', 'YES', 'NO', or None when no local model is usable.
+
+    With a decision model configured, it makes the yes/no call (a `noul` probability against
+    NUDGE_THRESHOLD) and the fast tier writes the topic only after a yes. Otherwise, or when
+    the decision call fails, one generative call does both, as before.
+    Measured 2026-10-12 (~/.claude/evals/clef-decision): Clef-flash 16/16 at 0.16 s, yes cases
+    0.60–0.91 and no cases 0.02–0.09; Qwen 3.6-35B-A3B wrote a specific topic on 8/8 yes
+    cases at 0.39 s, Apple's model on 6/8 (one empty, several vague)."""
+    if not text or os.environ.get("HAMSTER_LM") == "0":
+        return None
+    deadline = time.monotonic() + timeout if timeout else None
+    server = load_config().get("lm", {}).get("server")
+    if server and (server.get("models") or {}).get("decision") and server_ok(server):
+        answers = server_decide(server, {"passage": text[-INPUT_CHARS_SERVER:]},
+                                {"keep": {"type": "noul", "instructions": NUDGE_QUESTION}}, timeout)
+        p = ((answers or {}).get("keep") or {}).get("noul")
+        if isinstance(p, (int, float)):
+            if p < NUDGE_THRESHOLD:
+                return "NO"
+            left = None if deadline is None else deadline - time.monotonic()
+            topic = ask(text, TOPIC_INSTRUCTIONS, 40, tier="fast", timeout=left) if left is None or left >= 1 else None
+            topic = re.sub(r"^(yes|topic)\s*:\s*", "", (topic or "").strip().split("\n")[0], flags=re.I).strip(" .\"'`")
+            return f"YES: {topic}" if topic else "YES"
+    return ask(text, NUDGE_INSTRUCTIONS, 40, tier="fast", timeout=timeout)
+
+
 # Prompts the hooks and commands share, so a phrasing fix lands everywhere.
 CLUSTER_INSTRUCTIONS = (
     "You group tool-call errors from a coding session by root cause. Output only lines of the "
@@ -288,6 +334,17 @@ NUDGE_INSTRUCTIONS = (
     "future projects: a root cause, a workaround, a gotcha, a config or API fact that was hard "
     "to find. Ordinary progress reports, file edits and plans do not count. Answer on one line: "
     "`YES: <topic in under 12 words>` or `NO`."
+)
+NUDGE_QUESTION = (
+    "Does this passage record a reusable lesson worth saving to a knowledge base: a root "
+    "cause, a gotcha, a decision with its reason, or a non-obvious fix? Routine status "
+    "updates, task lists and progress reports do not count."
+)
+NUDGE_THRESHOLD = 0.4
+TOPIC_INSTRUCTIONS = (
+    "Name the reusable lesson in this passage as a short topic for a knowledge-base entry, under "
+    "12 words: the tool or system plus the gotcha, cause or fix. Output only the topic, no "
+    "punctuation at the end, no preamble."
 )
 SAVE_SESSION_INSTRUCTIONS = (
     'From this Claude Code session data, output ONLY a JSON object with keys: "title" (5-10 words, '

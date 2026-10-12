@@ -25,6 +25,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     models = ["small-1b", "big-27b"]
     key = None
     calls = []
+    noul = None  # decision-model probability; None → /systemone answers 404
 
     def _auth(self):
         if self.key and self.headers.get("Authorization") != f"Bearer {self.key}":
@@ -44,6 +45,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", 0))
         req = json.loads(self.rfile.read(n))
         Handler.calls.append(req)
+        if self.path.endswith("/systemone"):
+            if Handler.noul is None:
+                self.send_response(404); self.end_headers(); return
+            body = json.dumps({"model": req["model"], "answers": {"keep": {"type": "noul", "noul": Handler.noul}}}).encode()
+            self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
+            self.wfile.write(body)
+            return
         reply = {"choices": [{"message": {"content": f"<think>hmm</think>```json\nREPLY from {req['model']}\n```"}}]}
         body = json.dumps(reply).encode()
         self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
@@ -57,7 +65,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def server():
     srv = http.server.HTTPServer(("127.0.0.1", 0), Handler)
     t = threading.Thread(target=srv.serve_forever, daemon=True); t.start()
-    Handler.calls = []; Handler.key = None
+    Handler.calls = []; Handler.key = None; Handler.noul = None
     yield f"http://127.0.0.1:{srv.server_port}/v1"
     srv.shutdown()
 
@@ -85,6 +93,42 @@ def test_server_used_with_tiers_and_cleanup(env, server):
     assert lm.ask("q", "i", 20, tier="fast") == "REPLY from small-1b"
     assert lm.ask("q", "i", 20, tier="quality") == "REPLY from big-27b"
     assert Handler.calls[0]["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+DECIDE = {"fast": "small-1b", "quality": "big-27b", "decision": "clef-flash"}
+
+
+def test_nudge_decision_yes_then_fast_tier_topic(env, server):
+    Handler.noul = 0.9
+    write_cfg(env, {"url": server, "models": DECIDE})
+    lm = load("_lm")
+    assert lm.nudge("found the root cause") == "YES: REPLY from small-1b"
+    decide, topic = Handler.calls
+    assert decide["model"] == "clef-flash" and decide["truncate"] is False
+    assert topic["messages"][0]["content"] == lm.TOPIC_INSTRUCTIONS
+
+
+def test_nudge_decision_no_skips_generation(env, server):
+    Handler.noul = 0.1
+    write_cfg(env, {"url": server, "models": DECIDE})
+    lm = load("_lm")
+    assert lm.nudge("ran the tests, all green") == "NO"
+    assert len(Handler.calls) == 1
+
+
+def test_nudge_without_decision_model_asks_once(env, server):
+    write_cfg(env, {"url": server, "models": {"fast": "small-1b"}})
+    lm = load("_lm")
+    assert lm.nudge("text") == "REPLY from small-1b"
+    assert [c["messages"][0]["content"] for c in Handler.calls] == [lm.NUDGE_INSTRUCTIONS]
+
+
+def test_nudge_decision_failure_falls_back_to_generative(env, server):
+    Handler.noul = None  # /systemone 404s
+    write_cfg(env, {"url": server, "models": DECIDE})
+    lm = load("_lm")
+    assert lm.nudge("text") == "REPLY from small-1b"
+    assert Handler.calls[-1]["messages"][0]["content"] == lm.NUDGE_INSTRUCTIONS
 
 
 def test_key_from_file_ref(env, server, tmp_path):
