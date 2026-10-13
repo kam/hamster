@@ -10,7 +10,9 @@ Required keys: id, tool, field, pattern, action (block|warn), message, tests.
 A `block` rule with no test of each kind (expect block AND expect pass) is
 downgraded to `warn` at load and flagged `untested` — a guard nobody has
 proven is a nuisance, not a rule. Optional: event (default PreToolUse),
-flags ("i" for case-insensitive), source, created (defaults to the file's
+flags ("i" for case-insensitive, "q" to blank quoted strings before matching
+— a command-position rule must not fire on a verb inside a grep pattern or a
+message), source, created (defaults to the file's
 mtime date), note, keep (true = never a prune candidate), and `when` — an
 optional gate checked after the pattern, all keys AND-ed:
   files_exist: ["Gemfile"]        any listed file exists at the git toplevel (language/stack check)
@@ -161,9 +163,27 @@ def rule_input(rule, tool_name, tool_input):
     return val if isinstance(val, str) else None
 
 
+_QUOTED = re.compile(r"\"(?:[^\"\\]|\\.)*\"|'[^']*'")
+
+
+def blank_quotes(text):
+    """Quoted strings → spaces of the same length, so a `|` or a verb inside a
+    grep pattern or a message is not a command. A double-quoted string that
+    carries `$(` or a backtick is kept: the shell runs what is inside it."""
+    def repl(m):
+        s = m.group(0)
+        if s[0] == '"' and ("$(" in s or "`" in s):
+            return s
+        return " " * len(s)
+
+    return _QUOTED.sub(repl, text)
+
+
 def matches(rule, text):
-    flags = re.I if "i" in str(rule.get("flags", "")) else 0
-    return re.search(rule["pattern"], text, flags | re.M) is not None
+    opts = str(rule.get("flags", ""))
+    if "q" in opts:
+        text = blank_quotes(text)
+    return re.search(rule["pattern"], text, (re.I if "i" in opts else 0) | re.M) is not None
 
 
 def context(cwd=None):

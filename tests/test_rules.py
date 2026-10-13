@@ -255,3 +255,16 @@ def test_path_glob_star_stops_at_slash_and_bash_rejected(repo):
     assert guard("Edit", {"file_path": f"{env}/app/models/u.rb", "new_string": "binding.pry"}, cwd=str(env)).returncode == 0
     (rules / "gated.json").write_text(json.dumps(_rule(when={"path_glob": "app/*.rb"})))
     assert "path_glob needs" in cli("list", "--json").stdout
+
+
+def test_q_flag_ignores_quoted_text():
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"pattern": r"(?:^|[;&|]\s*)navigator\s+update\b", "flags": "q"}
+    assert not _rules.matches(rule, "grep -E 'foo|navigator update' notes.txt")
+    assert not _rules.matches(rule, 'grep -E "a\\"|navigator update" x')
+    assert _rules.matches(rule, "ls | navigator update task/x")
+    assert _rules.matches({**rule, "pattern": r"\$\(navigator\s+update"},
+                          'echo "$(navigator update task/x)"')
+    assert _rules.matches({**rule, "flags": ""}, "grep -E 'foo|navigator update' notes.txt")
