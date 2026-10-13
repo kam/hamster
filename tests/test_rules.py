@@ -255,3 +255,117 @@ def test_path_glob_star_stops_at_slash_and_bash_rejected(repo):
     assert guard("Edit", {"file_path": f"{env}/app/models/u.rb", "new_string": "binding.pry"}, cwd=str(env)).returncode == 0
     (rules / "gated.json").write_text(json.dumps(_rule(when={"path_glob": "app/*.rb"})))
     assert "path_glob needs" in cli("list", "--json").stdout
+
+
+def test_q_flag_ignores_quoted_text():
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"pattern": r"(?:^|[;&|]\s*)navigator\s+update\b", "flags": "q"}
+    assert not _rules.matches(rule, "grep -E 'foo|navigator update' notes.txt")
+    # an escape means no blanking: the raw text matches (fail-closed)
+    assert _rules.matches(rule, 'grep -E "a\\"|navigator update" x')
+    assert _rules.matches(rule, "ls | navigator update task/x")
+    assert _rules.matches({**rule, "pattern": r"\$\(navigator\s+update"},
+                          'echo "$(navigator update task/x)"')
+    assert _rules.matches({**rule, "flags": ""}, "grep -E 'foo|navigator update' notes.txt")
+
+
+def test_q_flag_escaped_quote_opens_no_string():
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"pattern": r"(?:^|[;&|]\s*)navigator\s+update\b", "flags": "q"}
+    assert _rules.matches(rule, "echo it\\'s; navigator update task/x; echo 'y'")
+
+
+def test_q_flag_comment_apostrophe_opens_no_string():
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"pattern": r"(?:^|[;&|]\s*)navigator\s+update\b", "flags": "q"}
+    assert _rules.matches(rule, "ls # don't\nnavigator update task/x\necho 'ok'")
+    assert not _rules.matches(rule, "ls # navigator update task/x")
+
+
+def test_q_flag_exotic_syntax_matches_raw():
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"pattern": r"(?:^|[;&|\n]\s*)navigator\s+update\b", "flags": "q"}
+    assert _rules.matches(rule, "echo $'it\\'s'; navigator update task/x; echo 'y'")
+    assert _rules.matches(rule, "ls;# don't\nnavigator update task/x\necho 'ok'")
+
+
+def test_q_flag_executed_strings_match_raw():
+    """2026-10-13 review r4 H3: a quoted string the shell runs is a command."""
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"pattern": r"(?:^|[;&|\n]\s*)navigator\s+delete\b", "flags": "q"}
+    for cmd in ("bash -c 'true; navigator delete task/foo'", 'sh -c "true; navigator delete task/foo"',
+                "zsh -c 'x | navigator delete task/foo'", "eval 'true; navigator delete task/foo'",
+                "ssh h 'cd x && navigator delete task/foo'", "watch -n1 'ls; navigator delete task/foo'",
+                "tmux send-keys 'clear; navigator delete task/foo' Enter",
+                '''python3 -c "import os; os.system('ls; navigator delete task/foo')"'''):
+        assert _rules.matches(rule, cmd), cmd
+    assert not _rules.matches(rule, "grep -E 'x|navigator delete' notes.txt")
+
+
+EXECUTORS = ['echo "true; navigator delete task/foo" | bash', "echo 'true; navigator delete task/foo' | sh", 'bash <(echo "true; navigator delete task/foo")', "trap 'x; navigator delete task/foo' EXIT", "alias n='x; navigator delete task/foo'; n", 'perl -e \'system("x; navigator delete task/foo")\'', "node -e 'x; navigator delete task/foo'", "osascript -e 'x; navigator delete task/foo'", 'awk \'BEGIN{system("x; navigator delete task/foo")}\'', "tmux new-window 'x; navigator delete task/foo'", "tmux run-shell 'x; navigator delete task/foo'", "git rebase -x 'x; navigator delete task/foo' main", "env -S 'sh -c x; navigator delete task/foo'", "script -q /dev/null 'x; navigator delete task/foo'", "make X='x; navigator delete task/foo'", "exec sh -c'x; navigator delete task/foo'"]
+
+
+def test_q_flag_only_blanks_read_only_commands():
+    """2026-10-13 review r5 H2: any command not known read-only matches raw."""
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"pattern": r"(?:^|[;&|\n(]\s*)navigator\s+delete\b", "flags": "q"}
+    for cmd in EXECUTORS:
+        assert _rules.matches(rule, cmd), cmd
+
+
+def test_q_flag_refuses_prefixes_git_and_code_options():
+    """2026-10-13 review r6 H2: env prefixes, git and options that run code."""
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"pattern": r"(?:^|[;&|\n(]\s*)navigator\s+(?:update|delete)\b", "flags": "q"}
+    for cmd in ('GIT_EDITOR="true; navigator update task/x --status done" git commit',
+                'GIT_EXTERNAL_DIFF="true;navigator delete task/x" git diff HEAD~1',
+                'GIT_PAGER="true; navigator delete task/x" git log -1',
+                'PAGER="true;navigator delete task/x" git show',
+                'git "-c" "core.pager=true; navigator delete task/x" log',
+                'git grep -O"true; navigator delete task/x" foo',
+                'LESSOPEN="|navigator delete task/x %s" less f',
+                "less '+!true;navigator delete task/x' f",
+                "rg --pre 'x; navigator delete task/x' foo",
+                'X="a; navigator delete task/x" grep y f'):
+        assert _rules.matches(rule, cmd), cmd
+
+
+def test_q_flag_quoted_command_word_matches_raw():
+    """2026-10-13 review r7 H1: a quoted command word is still a command."""
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"pattern": r"(?:^|[;&|\n(]\s*)navigator\s+delete\b", "flags": "q"}
+    for cmd in ('"eval" echo "x; navigator delete task/foo"', "'eval' printf 'x; navigator delete task/foo'",
+                '"watch" echo "x; navigator delete task/foo"', '"eval" "x; navigator delete task/foo"',
+                "'sh' '-c' 'true; navigator delete task/foo'"):
+        assert _rules.matches(rule, cmd), cmd
+    assert not _rules.matches(rule, "grep -E 'x|navigator delete' notes.txt")
+
+
+def test_q_flag_code_running_options_match_raw():
+    """2026-10-13 review r8: quoted `--pre`, and sort --compress-program."""
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"pattern": r"(?:^|[;&|\n(]\s*)navigator\s+delete\b", "flags": "q"}
+    for cmd in ("echo 'true; navigator delete task/foo' > /tmp/p; rg '--pre=sh' x /tmp/p",
+                """echo 'true; navigator delete task/foo' > /tmp/p; rg "--pre" sh x /tmp/p""",
+                "echo 'true; navigator delete task/foo' > /tmp/p; rg --p're'=sh x /tmp/p",
+                "printf 'x; navigator delete task/foo ' | sort --compress-program=sh -S 1",
+                "printf 'x; navigator delete task/foo ' | sort --comp=sh -S 1"):
+        assert _rules.matches(rule, cmd), cmd

@@ -23,7 +23,7 @@ Write `/tmp/hamster-rule-<id>.json` in this format (`${CLAUDE_PLUGIN_ROOT}/rules
   "id": "kebab-id",
   "tool": "Bash",                 // or Edit | Write | ["Edit","Write"]
   "field": "command",             // Bash: command; Edit/Write: file_path or content
-  "pattern": "<python regex>",    // add "flags": "i" for case-insensitive
+  "pattern": "<python regex>",    // "flags": "i" case-insensitive, "q" ignore quoted text in grep/rg/echo-only calls
   "action": "block",              // or warn
   "message": "<what to do instead, one sentence>",
   "source": "memory:<name>" | "solutions/<slug>" | "text",

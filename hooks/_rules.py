@@ -10,7 +10,10 @@ Required keys: id, tool, field, pattern, action (block|warn), message, tests.
 A `block` rule with no test of each kind (expect block AND expect pass) is
 downgraded to `warn` at load and flagged `untested` — a guard nobody has
 proven is a nuisance, not a rule. Optional: event (default PreToolUse),
-flags ("i" for case-insensitive), source, created (defaults to the file's
+flags ("i" for case-insensitive; "q" blanks quoted strings before matching, but
+only when every command in the call is a bare read-only one — grep, rg, echo,
+printf, head, tail, wc, uniq, cut, tr — so a verb inside a grep pattern or a message
+does not fire; anything else matches raw), source, created (defaults to the file's
 mtime date), note, keep (true = never a prune candidate), and `when` — an
 optional gate checked after the pattern, all keys AND-ed:
   files_exist: ["Gemfile"]        any listed file exists at the git toplevel (language/stack check)
@@ -161,9 +164,63 @@ def rule_input(rule, tool_name, tool_input):
     return val if isinstance(val, str) else None
 
 
+# An escaped character outside quotes is consumed first, so `it\'s` opens no
+# string; a `#` comment is consumed whole, so `# don't` opens none either.
+_QUOTED = re.compile(r"\\.|(?<!\S)#[^\n]*|\"(?:[^\"\\]|\\.)*\"|'[^']*'", re.S)
+
+
+def blank_quotes(text):
+    """Quoted strings → spaces of the same length, so a `|` or a verb inside a
+    grep pattern or a message is not a command. A double-quoted string that
+    carries `$(` or a backtick is kept: the shell runs what is inside it."""
+    def repl(m):
+        s = m.group(0)
+        if s[0] == "\\" or (s[0] == '"' and ("$(" in s or "`" in s)):
+            return s
+        return " " * len(s)
+
+    return _QUOTED.sub(repl, text)
+
+
+# Syntax the blanker cannot lex reliably (`$'…'`, escapes, heredocs, word-start
+# `#`; dev-lead git-guard's _EXOTIC_RE) and substitutions that run code.
+_EXOTIC = re.compile(r"<<|\\|\$'|(?<![^\s;&|(])#|`|\$\(|[<>]\(")
+_SEGMENT = re.compile(r"[^;&|\n]+")
+# Commands whose quoted arguments are only data. A list of executors can never
+# be complete (`| bash`, `trap`, `perl -e`, `GIT_EDITOR=…`), so `q` blanks only
+# when every command in the call is one of these, bare: no `VAR=` prefix, no
+# git, nothing that takes a command as an option value (reviews r5 H2, r6 H2).
+_READ_ONLY = {"grep", "egrep", "fgrep", "rg", "echo", "printf", "head", "tail",
+              "wc", "uniq", "cut", "tr", "true", "false"}
+# Options of the commands above that run a program (rg --pre; `sort` left the
+# list over --compress-program, review r8 H2). Read with the quote characters
+# stripped: the shell drops them, so `'--pre=sh'` is still --pre (r8 H1).
+_RUNS_CODE = re.compile(r"(?:^|\s)--pre(?:=|\s|$)|(?:^|\s)--pre-glob")
+
+
+def _quotes_are_data(text):
+    """True when blanking quoted strings cannot hide a command: no exotic
+    syntax, and every command in the call is a bare, known read-only one."""
+    if _EXOTIC.search(text):
+        return False
+    for seg in _SEGMENT.finditer(blank_quotes(text)):
+        raw = text[seg.start():seg.end()]
+        if not raw.strip():
+            continue
+        words, rwords = seg.group(0).split(), raw.split()
+        # The command word must read the same raw and blanked: `"eval" echo …`
+        # and an all-quoted `'sh' '-c' '…'` run code (review r7 H1).
+        if (not words or words[0] != rwords[0] or words[0] not in _READ_ONLY
+                or _RUNS_CODE.search(re.sub(r"['\"]", "", raw))):
+            return False
+    return True
+
+
 def matches(rule, text):
-    flags = re.I if "i" in str(rule.get("flags", "")) else 0
-    return re.search(rule["pattern"], text, flags | re.M) is not None
+    opts = str(rule.get("flags", ""))
+    if "q" in opts and _quotes_are_data(text):
+        text = blank_quotes(text)
+    return re.search(rule["pattern"], text, (re.I if "i" in opts else 0) | re.M) is not None
 
 
 def context(cwd=None):
