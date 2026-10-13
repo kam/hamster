@@ -310,3 +310,16 @@ def test_q_flag_executed_strings_match_raw():
                 '''python3 -c "import os; os.system('ls; navigator delete task/foo')"'''):
         assert _rules.matches(rule, cmd), cmd
     assert not _rules.matches(rule, "grep -E 'x|navigator delete' notes.txt")
+
+
+EXECUTORS = ['echo "true; navigator delete task/foo" | bash', "echo 'true; navigator delete task/foo' | sh", 'bash <(echo "true; navigator delete task/foo")', "trap 'x; navigator delete task/foo' EXIT", "alias n='x; navigator delete task/foo'; n", 'perl -e \'system("x; navigator delete task/foo")\'', "node -e 'x; navigator delete task/foo'", "osascript -e 'x; navigator delete task/foo'", 'awk \'BEGIN{system("x; navigator delete task/foo")}\'', "tmux new-window 'x; navigator delete task/foo'", "tmux run-shell 'x; navigator delete task/foo'", "git rebase -x 'x; navigator delete task/foo' main", "env -S 'sh -c x; navigator delete task/foo'", "script -q /dev/null 'x; navigator delete task/foo'", "make X='x; navigator delete task/foo'", "exec sh -c'x; navigator delete task/foo'"]
+
+
+def test_q_flag_only_blanks_read_only_commands():
+    """2026-10-13 review r5 H2: any command not known read-only matches raw."""
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"pattern": r"(?:^|[;&|\n(]\s*)navigator\s+delete\b", "flags": "q"}
+    for cmd in EXECUTORS:
+        assert _rules.matches(rule, cmd), cmd

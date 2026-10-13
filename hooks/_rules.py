@@ -182,16 +182,42 @@ def blank_quotes(text):
 
 
 # Syntax the blanker cannot lex reliably (`$'…'`, escapes, heredocs, word-start
-# `#`) — dev-lead git-guard's _EXOTIC_RE — and commands whose quoted argument
-# is itself run (`bash -c`, `eval`, `ssh`, `watch`, `xargs`, tmux `send-keys`):
-# a `q` rule matches the raw text instead, the strict reading.
-_EXOTIC = re.compile(r"<<|\\|\$'|(?<![^\s;&|(])#"
-                     r"|\s-\w*c\s|\b(?:eval|ssh|watch|xargs|send-keys|parallel|su|sudo)\b")
+# `#`; dev-lead git-guard's _EXOTIC_RE) and substitutions that run code.
+_EXOTIC = re.compile(r"<<|\\|\$'|(?<![^\s;&|(])#|`|\$\(|[<>]\(")
+_SEGMENT = re.compile(r"[^;&|\n]+")
+# Commands whose quoted arguments are only data. A list of executors can never
+# be complete (`| bash`, `trap`, `perl -e`, `git rebase -x` …), so `q` blanks
+# only when every command in the call is one of these (review r5 H2).
+_READ_ONLY = {"grep", "egrep", "fgrep", "rg", "ag", "ack", "echo", "printf",
+              "head", "tail", "wc", "sort", "uniq", "cat", "less", "cut", "tr",
+              "jq", "column", "nl", "ls", "true", "false", "test", "["}
+_GIT_READ_ONLY = {"log", "grep", "show", "commit", "tag", "diff", "status"}
+
+
+def _quotes_are_data(text):
+    """True when blanking quoted strings cannot hide a command: no exotic
+    syntax, and every command in the call is a known read-only one."""
+    if _EXOTIC.search(text):
+        return False
+    for seg in _SEGMENT.finditer(blank_quotes(text)):
+        words = seg.group(0).split()
+        while words and re.match(r"[A-Za-z_]\w*=", words[0]):
+            words.pop(0)
+        if not words:
+            continue
+        head = os.path.basename(words[0])
+        if head == "git":
+            sub = next((w for w in words[1:] if not w.startswith("-")), "")
+            if sub not in _GIT_READ_ONLY:
+                return False
+        elif head not in _READ_ONLY:
+            return False
+    return True
 
 
 def matches(rule, text):
     opts = str(rule.get("flags", ""))
-    if "q" in opts and not _EXOTIC.search(text):
+    if "q" in opts and _quotes_are_data(text):
         text = blank_quotes(text)
     return re.search(rule["pattern"], text, (re.I if "i" in opts else 0) | re.M) is not None
 
