@@ -10,9 +10,10 @@ Required keys: id, tool, field, pattern, action (block|warn), message, tests.
 A `block` rule with no test of each kind (expect block AND expect pass) is
 downgraded to `warn` at load and flagged `untested` — a guard nobody has
 proven is a nuisance, not a rule. Optional: event (default PreToolUse),
-flags ("i" for case-insensitive, "q" to blank quoted strings before matching
-— a command-position rule must not fire on a verb inside a grep pattern or a
-message), source, created (defaults to the file's
+flags ("i" for case-insensitive; "q" blanks quoted strings before matching, but
+only when every command in the call is a bare read-only one — grep, rg, echo,
+printf, head, tail, wc, sort … — so a verb inside a grep pattern or a message
+does not fire; anything else matches raw), source, created (defaults to the file's
 mtime date), note, keep (true = never a prune candidate), and `when` — an
 optional gate checked after the pattern, all keys AND-ed:
   files_exist: ["Gemfile"]        any listed file exists at the git toplevel (language/stack check)
@@ -186,31 +187,25 @@ def blank_quotes(text):
 _EXOTIC = re.compile(r"<<|\\|\$'|(?<![^\s;&|(])#|`|\$\(|[<>]\(")
 _SEGMENT = re.compile(r"[^;&|\n]+")
 # Commands whose quoted arguments are only data. A list of executors can never
-# be complete (`| bash`, `trap`, `perl -e`, `git rebase -x` …), so `q` blanks
-# only when every command in the call is one of these (review r5 H2).
-_READ_ONLY = {"grep", "egrep", "fgrep", "rg", "ag", "ack", "echo", "printf",
-              "head", "tail", "wc", "sort", "uniq", "cat", "less", "cut", "tr",
-              "jq", "column", "nl", "ls", "true", "false", "test", "["}
-_GIT_READ_ONLY = {"log", "grep", "show", "commit", "tag", "diff", "status"}
+# be complete (`| bash`, `trap`, `perl -e`, `GIT_EDITOR=…`), so `q` blanks only
+# when every command in the call is one of these, bare: no `VAR=` prefix, no
+# git, nothing that takes a command as an option value (reviews r5 H2, r6 H2).
+_READ_ONLY = {"grep", "egrep", "fgrep", "rg", "echo", "printf", "head", "tail",
+              "wc", "sort", "uniq", "cut", "tr", "column", "nl", "true", "false"}
+# Options of the commands above that run a program.
+_RUNS_CODE = re.compile(r"(?:^|\s)--pre(?:=|\s|$)|(?:^|\s)--pre-glob")
 
 
 def _quotes_are_data(text):
     """True when blanking quoted strings cannot hide a command: no exotic
-    syntax, and every command in the call is a known read-only one."""
+    syntax, and every command in the call is a bare, known read-only one."""
     if _EXOTIC.search(text):
         return False
     for seg in _SEGMENT.finditer(blank_quotes(text)):
         words = seg.group(0).split()
-        while words and re.match(r"[A-Za-z_]\w*=", words[0]):
-            words.pop(0)
         if not words:
             continue
-        head = os.path.basename(words[0])
-        if head == "git":
-            sub = next((w for w in words[1:] if not w.startswith("-")), "")
-            if sub not in _GIT_READ_ONLY:
-                return False
-        elif head not in _READ_ONLY:
+        if words[0] not in _READ_ONLY or _RUNS_CODE.search(seg.group(0)):
             return False
     return True
 

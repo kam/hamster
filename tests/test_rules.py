@@ -323,3 +323,22 @@ def test_q_flag_only_blanks_read_only_commands():
     rule = {"pattern": r"(?:^|[;&|\n(]\s*)navigator\s+delete\b", "flags": "q"}
     for cmd in EXECUTORS:
         assert _rules.matches(rule, cmd), cmd
+
+
+def test_q_flag_refuses_prefixes_git_and_code_options():
+    """2026-10-13 review r6 H2: env prefixes, git and options that run code."""
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"pattern": r"(?:^|[;&|\n(]\s*)navigator\s+(?:update|delete)\b", "flags": "q"}
+    for cmd in ('GIT_EDITOR="true; navigator update task/x --status done" git commit',
+                'GIT_EXTERNAL_DIFF="true;navigator delete task/x" git diff HEAD~1',
+                'GIT_PAGER="true; navigator delete task/x" git log -1',
+                'PAGER="true;navigator delete task/x" git show',
+                'git "-c" "core.pager=true; navigator delete task/x" log',
+                'git grep -O"true; navigator delete task/x" foo',
+                'LESSOPEN="|navigator delete task/x %s" less f',
+                "less '+!true;navigator delete task/x' f",
+                "rg --pre 'x; navigator delete task/x' foo",
+                'X="a; navigator delete task/x" grep y f'):
+        assert _rules.matches(rule, cmd), cmd
