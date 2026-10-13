@@ -276,3 +276,12 @@ def test_q_flag_escaped_quote_opens_no_string():
 
     rule = {"pattern": r"(?:^|[;&|]\s*)navigator\s+update\b", "flags": "q"}
     assert _rules.matches(rule, "echo it\\'s; navigator update task/x; echo 'y'")
+
+
+def test_q_flag_comment_apostrophe_opens_no_string():
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"pattern": r"(?:^|[;&|]\s*)navigator\s+update\b", "flags": "q"}
+    assert _rules.matches(rule, "ls # don't\nnavigator update task/x\necho 'ok'")
+    assert not _rules.matches(rule, "ls # navigator update task/x")

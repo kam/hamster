@@ -163,8 +163,9 @@ def rule_input(rule, tool_name, tool_input):
     return val if isinstance(val, str) else None
 
 
-# An escaped character outside quotes is consumed first, so `it\'s` opens no string.
-_QUOTED = re.compile(r"\\.|\"(?:[^\"\\]|\\.)*\"|'[^']*'", re.S)
+# An escaped character outside quotes is consumed first, so `it\'s` opens no
+# string; a `#` comment is consumed whole, so `# don't` opens none either.
+_QUOTED = re.compile(r"\\.|(?<!\S)#[^\n]*|\"(?:[^\"\\]|\\.)*\"|'[^']*'", re.S)
 
 
 def blank_quotes(text):
