@@ -342,3 +342,16 @@ def test_q_flag_refuses_prefixes_git_and_code_options():
                 "rg --pre 'x; navigator delete task/x' foo",
                 'X="a; navigator delete task/x" grep y f'):
         assert _rules.matches(rule, cmd), cmd
+
+
+def test_q_flag_quoted_command_word_matches_raw():
+    """2026-10-13 review r7 H1: a quoted command word is still a command."""
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"pattern": r"(?:^|[;&|\n(]\s*)navigator\s+delete\b", "flags": "q"}
+    for cmd in ('"eval" echo "x; navigator delete task/foo"', "'eval' printf 'x; navigator delete task/foo'",
+                '"watch" echo "x; navigator delete task/foo"', '"eval" "x; navigator delete task/foo"',
+                "'sh' '-c' 'true; navigator delete task/foo'"):
+        assert _rules.matches(rule, cmd), cmd
+    assert not _rules.matches(rule, "grep -E 'x|navigator delete' notes.txt")

@@ -202,10 +202,14 @@ def _quotes_are_data(text):
     if _EXOTIC.search(text):
         return False
     for seg in _SEGMENT.finditer(blank_quotes(text)):
-        words = seg.group(0).split()
-        if not words:
+        raw = text[seg.start():seg.end()]
+        if not raw.strip():
             continue
-        if words[0] not in _READ_ONLY or _RUNS_CODE.search(seg.group(0)):
+        words, rwords = seg.group(0).split(), raw.split()
+        # The command word must read the same raw and blanked: `"eval" echo …`
+        # and an all-quoted `'sh' '-c' '…'` run code (review r7 H1).
+        if (not words or words[0] != rwords[0] or words[0] not in _READ_ONLY
+                or _RUNS_CODE.search(seg.group(0))):
             return False
     return True
 
