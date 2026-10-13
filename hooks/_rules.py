@@ -181,9 +181,15 @@ def blank_quotes(text):
     return _QUOTED.sub(repl, text)
 
 
+# Syntax the blanker cannot lex reliably (`$'…'`, escapes, heredocs, word-start
+# `#`): a `q` rule matches the raw text instead, the strict reading — same bail
+# as dev-lead git-guard's _EXOTIC_RE.
+_EXOTIC = re.compile(r"<<|\\|\$'|(?<![^\s;&|(])#")
+
+
 def matches(rule, text):
     opts = str(rule.get("flags", ""))
-    if "q" in opts:
+    if "q" in opts and not _EXOTIC.search(text):
         text = blank_quotes(text)
     return re.search(rule["pattern"], text, (re.I if "i" in opts else 0) | re.M) is not None
 

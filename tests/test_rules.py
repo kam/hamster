@@ -263,7 +263,8 @@ def test_q_flag_ignores_quoted_text():
 
     rule = {"pattern": r"(?:^|[;&|]\s*)navigator\s+update\b", "flags": "q"}
     assert not _rules.matches(rule, "grep -E 'foo|navigator update' notes.txt")
-    assert not _rules.matches(rule, 'grep -E "a\\"|navigator update" x')
+    # an escape means no blanking: the raw text matches (fail-closed)
+    assert _rules.matches(rule, 'grep -E "a\\"|navigator update" x')
     assert _rules.matches(rule, "ls | navigator update task/x")
     assert _rules.matches({**rule, "pattern": r"\$\(navigator\s+update"},
                           'echo "$(navigator update task/x)"')
@@ -285,3 +286,12 @@ def test_q_flag_comment_apostrophe_opens_no_string():
     rule = {"pattern": r"(?:^|[;&|]\s*)navigator\s+update\b", "flags": "q"}
     assert _rules.matches(rule, "ls # don't\nnavigator update task/x\necho 'ok'")
     assert not _rules.matches(rule, "ls # navigator update task/x")
+
+
+def test_q_flag_exotic_syntax_matches_raw():
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"pattern": r"(?:^|[;&|\n]\s*)navigator\s+update\b", "flags": "q"}
+    assert _rules.matches(rule, "echo $'it\\'s'; navigator update task/x; echo 'y'")
+    assert _rules.matches(rule, "ls;# don't\nnavigator update task/x\necho 'ok'")
