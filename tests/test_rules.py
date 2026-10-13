@@ -268,3 +268,11 @@ def test_q_flag_ignores_quoted_text():
     assert _rules.matches({**rule, "pattern": r"\$\(navigator\s+update"},
                           'echo "$(navigator update task/x)"')
     assert _rules.matches({**rule, "flags": ""}, "grep -E 'foo|navigator update' notes.txt")
+
+
+def test_q_flag_escaped_quote_opens_no_string():
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"pattern": r"(?:^|[;&|]\s*)navigator\s+update\b", "flags": "q"}
+    assert _rules.matches(rule, "echo it\\'s; navigator update task/x; echo 'y'")

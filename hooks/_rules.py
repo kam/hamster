@@ -163,7 +163,8 @@ def rule_input(rule, tool_name, tool_input):
     return val if isinstance(val, str) else None
 
 
-_QUOTED = re.compile(r"\"(?:[^\"\\]|\\.)*\"|'[^']*'")
+# An escaped character outside quotes is consumed first, so `it\'s` opens no string.
+_QUOTED = re.compile(r"\\.|\"(?:[^\"\\]|\\.)*\"|'[^']*'", re.S)
 
 
 def blank_quotes(text):
@@ -172,7 +173,7 @@ def blank_quotes(text):
     carries `$(` or a backtick is kept: the shell runs what is inside it."""
     def repl(m):
         s = m.group(0)
-        if s[0] == '"' and ("$(" in s or "`" in s):
+        if s[0] == "\\" or (s[0] == '"' and ("$(" in s or "`" in s)):
             return s
         return " " * len(s)
 
