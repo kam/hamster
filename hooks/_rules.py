@@ -12,7 +12,7 @@ downgraded to `warn` at load and flagged `untested` — a guard nobody has
 proven is a nuisance, not a rule. Optional: event (default PreToolUse),
 flags ("i" for case-insensitive; "q" blanks quoted strings before matching, but
 only when every command in the call is a bare read-only one — grep, rg, echo,
-printf, head, tail, wc, sort … — so a verb inside a grep pattern or a message
+printf, head, tail, wc, uniq, cut, tr — so a verb inside a grep pattern or a message
 does not fire; anything else matches raw), source, created (defaults to the file's
 mtime date), note, keep (true = never a prune candidate), and `when` — an
 optional gate checked after the pattern, all keys AND-ed:
