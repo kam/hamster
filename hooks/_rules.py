@@ -182,9 +182,11 @@ def blank_quotes(text):
 
 
 # Syntax the blanker cannot lex reliably (`$'…'`, escapes, heredocs, word-start
-# `#`): a `q` rule matches the raw text instead, the strict reading — same bail
-# as dev-lead git-guard's _EXOTIC_RE.
-_EXOTIC = re.compile(r"<<|\\|\$'|(?<![^\s;&|(])#")
+# `#`) — dev-lead git-guard's _EXOTIC_RE — and commands whose quoted argument
+# is itself run (`bash -c`, `eval`, `ssh`, `watch`, `xargs`, tmux `send-keys`):
+# a `q` rule matches the raw text instead, the strict reading.
+_EXOTIC = re.compile(r"<<|\\|\$'|(?<![^\s;&|(])#"
+                     r"|\s-\w*c\s|\b(?:eval|ssh|watch|xargs|send-keys|parallel|su|sudo)\b")
 
 
 def matches(rule, text):

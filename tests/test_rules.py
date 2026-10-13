@@ -295,3 +295,18 @@ def test_q_flag_exotic_syntax_matches_raw():
     rule = {"pattern": r"(?:^|[;&|\n]\s*)navigator\s+update\b", "flags": "q"}
     assert _rules.matches(rule, "echo $'it\\'s'; navigator update task/x; echo 'y'")
     assert _rules.matches(rule, "ls;# don't\nnavigator update task/x\necho 'ok'")
+
+
+def test_q_flag_executed_strings_match_raw():
+    """2026-10-13 review r4 H3: a quoted string the shell runs is a command."""
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"pattern": r"(?:^|[;&|\n]\s*)navigator\s+delete\b", "flags": "q"}
+    for cmd in ("bash -c 'true; navigator delete task/foo'", 'sh -c "true; navigator delete task/foo"',
+                "zsh -c 'x | navigator delete task/foo'", "eval 'true; navigator delete task/foo'",
+                "ssh h 'cd x && navigator delete task/foo'", "watch -n1 'ls; navigator delete task/foo'",
+                "tmux send-keys 'clear; navigator delete task/foo' Enter",
+                '''python3 -c "import os; os.system('ls; navigator delete task/foo')"'''):
+        assert _rules.matches(rule, cmd), cmd
+    assert not _rules.matches(rule, "grep -E 'x|navigator delete' notes.txt")
