@@ -355,3 +355,17 @@ def test_q_flag_quoted_command_word_matches_raw():
                 "'sh' '-c' 'true; navigator delete task/foo'"):
         assert _rules.matches(rule, cmd), cmd
     assert not _rules.matches(rule, "grep -E 'x|navigator delete' notes.txt")
+
+
+def test_q_flag_code_running_options_match_raw():
+    """2026-10-13 review r8: quoted `--pre`, and sort --compress-program."""
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"pattern": r"(?:^|[;&|\n(]\s*)navigator\s+delete\b", "flags": "q"}
+    for cmd in ("echo 'true; navigator delete task/foo' > /tmp/p; rg '--pre=sh' x /tmp/p",
+                """echo 'true; navigator delete task/foo' > /tmp/p; rg "--pre" sh x /tmp/p""",
+                "echo 'true; navigator delete task/foo' > /tmp/p; rg --p're'=sh x /tmp/p",
+                "printf 'x; navigator delete task/foo ' | sort --compress-program=sh -S 1",
+                "printf 'x; navigator delete task/foo ' | sort --comp=sh -S 1"):
+        assert _rules.matches(rule, cmd), cmd

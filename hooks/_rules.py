@@ -191,8 +191,10 @@ _SEGMENT = re.compile(r"[^;&|\n]+")
 # when every command in the call is one of these, bare: no `VAR=` prefix, no
 # git, nothing that takes a command as an option value (reviews r5 H2, r6 H2).
 _READ_ONLY = {"grep", "egrep", "fgrep", "rg", "echo", "printf", "head", "tail",
-              "wc", "sort", "uniq", "cut", "tr", "column", "nl", "true", "false"}
-# Options of the commands above that run a program.
+              "wc", "uniq", "cut", "tr", "true", "false"}
+# Options of the commands above that run a program (rg --pre; `sort` left the
+# list over --compress-program, review r8 H2). Read with the quote characters
+# stripped: the shell drops them, so `'--pre=sh'` is still --pre (r8 H1).
 _RUNS_CODE = re.compile(r"(?:^|\s)--pre(?:=|\s|$)|(?:^|\s)--pre-glob")
 
 
@@ -209,7 +211,7 @@ def _quotes_are_data(text):
         # The command word must read the same raw and blanked: `"eval" echo …`
         # and an all-quoted `'sh' '-c' '…'` run code (review r7 H1).
         if (not words or words[0] != rwords[0] or words[0] not in _READ_ONLY
-                or _RUNS_CODE.search(seg.group(0))):
+                or _RUNS_CODE.search(re.sub(r"['\"]", "", raw))):
             return False
     return True
 
