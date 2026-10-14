@@ -1,5 +1,5 @@
 {
-  "description": "hamster — capture tool failures (PostToolUseFailure), one-step retro on Stop when errors pile up, handoff load + memory decay + rule recall at SessionStart, handoff auto-snapshot before compaction, deterministic rule guards on Bash/Edit/Write, and cold-cache cost guards on SendMessage (idle agent) and UserPromptSubmit (idle chat). Every hook fails open.",
+  "description": "hamster — capture tool failures (PostToolUseFailure), one-step retro on Stop when errors pile up, handoff load + memory decay + rule recall at SessionStart, handoff auto-snapshot before compaction, deterministic rule guards on Bash/Edit/Write, and cold-cache cost guards on SendMessage (idle agent) and UserPromptSubmit (idle chat). Decision log: pasted client emails/notes saved as git-excluded sources, a once-only stop check that each has a row, standing decisions loaded at session start, and a shape guard on docs/decisions.md (fails closed). Every other hook fails open.",
   "hooks": {
     "PreToolUse": [
       {
@@ -21,6 +21,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/decision-guard.py",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -30,6 +40,11 @@
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/stale-guard.py",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/decision-capture.py",
+            "timeout": 10
           }
         ]
       }
@@ -52,6 +67,11 @@
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/error-retro.py",
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/decision-stop.py",
+            "timeout": 10
           }
         ]
       }
@@ -65,6 +85,12 @@
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/handoff-load.py",
             "timeout": 10,
             "statusMessage": "Loading handoff"
+          },
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/decisions-load.py",
+            "timeout": 10,
+            "statusMessage": "Loading decisions"
           },
           {
             "type": "command",

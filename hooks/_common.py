@@ -17,29 +17,38 @@ EXCLUDE_LINE = ".claude/handoffs/"
 # --- secrets -----------------------------------------------------------------
 # Shape list first (cheap, precise), then key=value, then a generic
 # high-entropy catch-all. Every snapshot field passes through redact().
-_SHAPES = [
-    r"sk-[A-Za-z0-9_-]{16,}",  # OpenAI / Anthropic (sk-ant-, sk-proj-)
-    r"sk_(?:live|test)_[A-Za-z0-9]{16,}",  # Stripe
-    r"rk_(?:live|test)_[A-Za-z0-9]{16,}",
+_NB = r"(?<![A-Za-z0-9])"  # "task-…", "risk-…" are words, not keys
+_TOKEN_SHAPES = [
+    _NB + r"sk-[A-Za-z0-9_-]{16,}",  # OpenAI / Anthropic (sk-ant-, sk-proj-)
+    _NB + r"sk_(?:live|test)_[A-Za-z0-9]{16,}",  # Stripe
+    _NB + r"rk_(?:live|test)_[A-Za-z0-9]{16,}",
     r"AKIA[A-Z0-9]{16}",  # AWS access key id
     r"AIza[0-9A-Za-z_-]{35}",  # Google API key
     r"ya29\.[0-9A-Za-z_-]{20,}",  # Google OAuth
     r"gh[pousr]_[A-Za-z0-9]{20,}",  # GitHub tokens
     r"github_pat_[A-Za-z0-9_]{20,}",
     r"glpat-[A-Za-z0-9_-]{20,}",  # GitLab
-    r"xox[abposr]-[A-Za-z0-9-]{10,}",  # Slack
-    r"xapp-[A-Za-z0-9-]{10,}",
+    _NB + r"xox[abposr]-[A-Za-z0-9-]{10,}",  # Slack
+    _NB + r"xapp-[A-Za-z0-9-]{10,}",
     r"eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",  # JWT
     r"-----BEGIN[^-]{0,40}-----",  # PEM headers (any kind)
     r"PuTTY-User-Key-File-\d",
     r"[a-z][a-z0-9+.-]*://[^\s/:@]+:[^\s/@]+@",  # scheme://user:pass@
-    r"(?i:bearer)\s+[A-Za-z0-9._~+/=-]{16,}",
+]
+_BEARER = r"(?i:bearer)\s+[A-Za-z0-9._~+/=-]{16,}"
+_CATCHALL_SHAPES = [
     r"(?i:api[_-]?key|secret|token|passw(?:or)?d|pwd|auth)"  # key: value / key=value
     r"[A-Za-z0-9_-]*\s*[:=]\s*[\"']?[^\s\"',;]{6,}",
     r"\b[A-Za-z0-9+/]{40,}={0,2}\b",  # long base64-ish blobs
     r"\b[0-9a-f]{48,}\b",  # long hex (private keys, hashes)
 ]
-SECRET = re.compile("|".join(f"(?:{s})" for s in _SHAPES))
+SECRET = re.compile("|".join(f"(?:{s})" for s in [*_TOKEN_SHAPES, _BEARER, *_CATCHALL_SHAPES]))
+# Token shapes only — no key=value or long-blob catch-alls, which flag prose
+# such as "Auth: passwordless magic links", and a bearer value must hold a digit
+# ("Bearer authentication/authorization" is prose). For text a person wrote.
+SECRET_TOKEN = re.compile(
+    "|".join(f"(?:{s})" for s in [*_TOKEN_SHAPES, r"(?i:bearer)\s+(?=\S*\d)[A-Za-z0-9._~+/=-]{16,}"])
+)
 
 
 def redact(text):
@@ -103,8 +112,8 @@ def is_tracked(path, cwd):
         return True  # unknown → treat as untrusted
 
 
-def ensure_excluded(common_dir):
-    """Append the exclude line to <git-common-dir>/info/exclude. Returns True
+def ensure_excluded(common_dir, line=EXCLUDE_LINE):
+    """Append `line` (default: the handoffs dir) to <git-common-dir>/info/exclude. Returns True
     only when the line is present afterwards. Worktrees and submodules share
     a common dir, so this works where `.git` is a file."""
     if not common_dir:
@@ -113,11 +122,11 @@ def ensure_excluded(common_dir):
         exclude = Path(common_dir) / "info" / "exclude"
         exclude.parent.mkdir(parents=True, exist_ok=True)
         existing = exclude.read_text(encoding="utf-8", errors="replace") if exclude.exists() else ""
-        if EXCLUDE_LINE in existing.splitlines():
+        if line in existing.splitlines():
             return True
         with open(exclude, "a", encoding="utf-8") as fh:
             fh.write(
-                ("" if existing.endswith("\n") or not existing else "\n") + EXCLUDE_LINE + "\n"
+                ("" if existing.endswith("\n") or not existing else "\n") + line + "\n"
             )
         return True
     except Exception:
