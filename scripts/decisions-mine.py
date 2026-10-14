@@ -86,7 +86,9 @@ def main():
         sys.exit("not inside a git work tree")
     if not (ensure_excluded(common, EXCLUDE) and excluded(top)):
         sys.exit(f"{EXCLUDE} is not git-ignored here; refusing to write sources")
-    if a.out and (is_tracked(Path(a.out).resolve(), top) or not excluded(top, a.out)):
+    out_abs = Path(a.out).resolve() if a.out else None  # one resolution for checks and write
+    inside = out_abs and str(out_abs).startswith(os.path.realpath(top) + os.sep)
+    if inside and (is_tracked(out_abs, top) or not excluded(top, str(out_abs))):
         sys.exit(f"--out {a.out} is tracked or not git-ignored; candidates hold third-party text")
     tdir = claude_home() / "projects" / re.sub(r"[/.]", "-", top)
     sources, cues = [], []
@@ -111,7 +113,7 @@ def main():
             uniq.append(s)
 
     today = dt.date.today().isoformat()
-    out = Path(a.out) if a.out else Path(top) / ".claude/decisions" / f"candidates-{today}.md"
+    out = out_abs or Path(top) / ".claude/decisions" / f"candidates-{today}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         f"# Decision candidates — {Path(top).name}, mined {today}",

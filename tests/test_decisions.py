@@ -238,6 +238,9 @@ def test_guard_archive_supersede_points_into_log(repo):
     ('grep -n "tee" docs/decisions.md', 0),
     ('rg "sed -i" docs/decisions.md', 0),
     ("cat <<'EOF' | less\nrm docs/decisions.md\nEOF", 0),
+    ("git restore --staged docs/decisions.md", 0),
+    ("git restore --staged --worktree docs/decisions.md", 2),
+    ("git restore docs/decisions.md", 2),
 ])
 def test_guard_bash(repo, cmd, expect):
     write_log(repo, "")
@@ -343,6 +346,59 @@ def test_secret_in_row_is_blocked(repo):
 def test_real_names_pass(repo, who):
     code, _, err = guard_write(repo, f"| DEC-1 | 2026-10-13 | x | w | r | {who} | chat | - | decided |\n")
     assert code == 0, err
+
+
+# --- review round 2 -------------------------------------------------------------
+@pytest.mark.parametrize("text", [
+    "Authentication: Devise with magic links",
+    "Auth: passwordless magic links",
+    "Session token: rotated every 24h",
+    "docs/research/architecture/payments/stripe/webhooks.md",
+])
+def test_auth_decisions_are_not_secrets(repo, text):
+    code, _, err = guard_write(repo, f"| DEC-1 | 2026-10-13 | {text} | w | r | Kam | chat | {text} | decided |\n")
+    assert code == 0, err
+
+
+TEAMS = "\n".join([
+    "[10:30 AM] Sarah Chen: thanks all for joining the checkout review",
+    "[10:31 AM] Kam: the Paddle fees came in higher than we expected",
+    "[10:32 AM] Sarah Chen: ok we agreed to go with Stripe for launch",
+    "[10:33 AM] Tom Ng: I will update the payment provider settings today",
+])
+ZOOM = "\n".join([
+    "10:30:02 From Sarah Chen to Everyone: thanks all for joining the review",
+    "10:31:40 From Kam to Everyone: the Paddle fees came in higher than expected",
+    "10:32:14 From Sarah Chen to Everyone: ok we agreed to go with Stripe",
+    "10:33:09 From Tom Ng to Everyone: I will update the provider settings today",
+])
+
+
+@pytest.mark.parametrize("text", [TEAMS, ZOOM])
+def test_meeting_chat_exports_are_notes(repo, text):
+    run("decision-capture.py", {"cwd": str(repo), "session_id": "s1", "prompt": paste(text)})
+    assert len(list((repo / ".claude/decisions/sources").glob("*-notes-*.txt"))) == 1
+
+
+def test_bare_paste_marker_matches():
+    sys.path.insert(0, str(HOOKS))
+    import _decisions as d
+
+    assert d.pastes("<pasted_content>hello</pasted_content>") == ["hello"]
+
+
+def test_row_without_closing_pipe_is_malformed(repo):
+    write_log(repo, "| DEC-1 | 2026-10-13 | x | w | r | Kam | chat | - | decided \\|\n")
+    assert "Malformed rows" in run("decisions-load.py", {"cwd": str(repo)})[1]
+
+
+def test_mine_relative_out_from_subdir(repo, tmp_path):
+    (repo / "sub").mkdir()
+    p = subprocess.run([sys.executable, str(ROOT / "scripts/decisions-mine.py"), "--cwd", str(repo),
+                        "--out", "../.claude/decisions/c.md"],
+                       capture_output=True, text=True, cwd=repo / "sub", env=os.environ.copy())
+    assert p.returncode == 0, p.stderr
+    assert (repo / ".claude/decisions/c.md").exists()
 
 
 def test_load_strips_markup_from_rows(repo):

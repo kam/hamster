@@ -40,6 +40,9 @@ _SHAPES = [
     r"\b[0-9a-f]{48,}\b",  # long hex (private keys, hashes)
 ]
 SECRET = re.compile("|".join(f"(?:{s})" for s in _SHAPES))
+# Token shapes only — no key=value or long-blob catch-alls, which flag prose
+# such as "Auth: passwordless magic links". For text a person wrote on purpose.
+SECRET_TOKEN = re.compile("|".join(f"(?:{s})" for s in _SHAPES[:-3]))
 
 
 def redact(text):

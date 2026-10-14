@@ -32,10 +32,16 @@ SHA_RE = re.compile(r"sha:([0-9a-f]{12})")
 #   <pasted_content id="…"> … </pasted_content id="…">
 # The closing tag repeats the id, so nested or adjacent pastes pair correctly.
 PASTE_RE = re.compile(
-    r"<pasted_content(\s[^>]*)?>\n?(.*?)\n?</pasted_content\1>", re.S | re.I
+    r"<pasted_content(\s[^>]*|)>\n?(.*?)\n?</pasted_content\1>", re.S | re.I
 )
 HEADER_RE = re.compile(r"^\s*>?\s*(from|to|cc|subject|sent|date):\s+\S", re.I | re.M)
 # A line that reads as a log, stack trace or code rather than prose.
+# A chat-export prefix: "[10:32 AM] Sarah Chen:" (Teams), "10:32:14 From Sarah Chen to
+# Everyone:" (Zoom). Stripped before the noise test so meeting chat reads as prose.
+CHAT_PREFIX_RE = re.compile(
+    r"^\s*\[?\d{1,2}:\d{2}(?::\d{2})?\s*(?:[AP]M)?\]?\s*(?:From\s+.{1,60}?\s+to\s+\S+:)?\s*",
+    re.I,
+)
 NOISE_LINE_RE = re.compile(
     r"^\s*(\d{4}-\d{2}-\d{2}[T ]\d|\[?\d{2}:\d{2}:\d{2}|at \S+\(|File \"|[#$>] |commit [0-9a-f]{7,}"
     r"|[{}()\[\];]|.*[{};]\s*$|.*\s(=|==|=>|->)\s)"
@@ -75,7 +81,12 @@ def is_email(text):
 
 def prose_lines(text):
     lines = [ln for ln in (text or "").splitlines() if ln.strip()]
-    return [ln for ln in lines if not NOISE_LINE_RE.match(ln) and len(ln.split()) >= 4], len(lines)
+    prose = []
+    for ln in lines:
+        body = CHAT_PREFIX_RE.sub("", ln, count=1)
+        if not NOISE_LINE_RE.match(body) and len(body.split()) >= 4:
+            prose.append(ln)
+    return prose, len(lines)
 
 
 def kind_of(paste):
@@ -140,8 +151,10 @@ CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
 def split_row(line):
     """Cells of a table line; `\\|` is a literal pipe inside a cell."""
     s = line.strip()
-    if not (s.startswith("|") and s.endswith("|") and not s.endswith("\\|")):
+    if not (s.startswith("|") and s.endswith("|")):
         return None
+    if s.endswith("\\|"):
+        return []  # no closing pipe: reported as malformed, never dropped
     return [c.strip() for c in CELL_SPLIT_RE.split(s[1:-1])]
 
 
@@ -164,7 +177,7 @@ def rows(text):
             if [c.lower() for c in cells] == [c.lower() for c in COLUMNS]:
                 header_seen = True
             continue
-        if all(re.fullmatch(r":?-{3,}:?", c) for c in cells):
+        if cells and all(re.fullmatch(r":?-{3,}:?", c) for c in cells):
             continue
         row = {"_line": n}
         if len(cells) != len(COLUMNS):

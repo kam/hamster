@@ -33,7 +33,7 @@ from pathlib import Path
 
 try:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from _common import redact
+    from _common import SECRET_TOKEN
     from _decisions import ARCHIVE, COLUMNS, ID_RE, LOG, STATUS_RE, is_hamster_log, read, rows
 except Exception:
     sys.exit(0)
@@ -51,6 +51,8 @@ BASH_WRITE_RE = re.compile(
     rf"|{CMD}(?:cp|mv|rsync|install|ln)\b[^;&|]*{LOG_PATH}\s*(?:$|[;&|)])"
     rf"|{CMD}git\s+(?:checkout|restore)\b[^;&|]*{LOG_PATH})"
 )
+# `git restore --staged` without --worktree touches only the index.
+INDEX_ONLY_RE = re.compile(r"git\s+restore\b(?=[^;&|]*--staged)(?![^;&|]*--worktree)[^;&|]*")
 QUOTED_RE = re.compile(r"\"(?:[^\"\\]|\\.)*\"|'[^']*'")
 HEREDOC_RE = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?[^\n]*\n(.*?)\n\s*\1\b", re.S)
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -130,7 +132,7 @@ def check(text, other):
             # The same row in both files is an archive move in progress.
             problems.append(f"{where}: {rid} already used by a different row in the other file")
         seen.add(rid)
-        secret = [c for c in COLUMNS if redact(r[c]) != r[c]]
+        secret = [c for c in COLUMNS if SECRET_TOKEN.search(r[c])]
         if secret:
             problems.append(f"{where}: {', '.join(secret)} looks like it holds a secret; redact it")
         if not DATE_RE.match(r["Date"]):
@@ -191,7 +193,7 @@ def main():
         cmd = str(ti.get("command") or "")
         if "docs/decisions" not in cmd:
             return
-        bare = strip_data(cmd)
+        bare = INDEX_ONLY_RE.sub(" ", strip_data(cmd))
         if BASH_WRITE_RE.search(bare) and bash_target_is_log(bare, data.get("cwd") or os.getcwd()):
             block("Bash writes to the decision log bypass this guard. Use Edit or Write.")
         return
