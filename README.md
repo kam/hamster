@@ -22,6 +22,11 @@ The premise: a lesson that lives as prose gets forgotten. A lesson that lives as
 | `hooks/rules-recall.py` | SessionStart | One line: rules active, untested, stale. Plus earlier Navigator lessons for this repo. |
 | `hooks/memory-prune.py` | SessionStart | Archives auto-memory files whose `decay_days` elapsed; sweeps old markers |
 | `hooks/handoff-load.py` / `handoff-precompact.py` | SessionStart / PreCompact | The [claude-handoff](https://github.com/kam/claude-handoff) pair, now bundled |
+| `hooks/decision-capture.py` | UserPromptSubmit | A pasted email, or a long paste with a decision cue, is redacted and saved once by sha to `.claude/decisions/sources/` (git-excluded); the model is told to record it in `docs/decisions.md`. Chat cues ("agreed", "go with") nudge at most 3 times a session, only where a log exists. No model call. `HAMSTER_DECISIONS=0` disables capture, stop check and load. |
+| `hooks/decision-stop.py` | Stop | Blocks once per saved source whose `sha:` no row cites; the model records it or says there was no decision |
+| `hooks/decisions-load.py` | SessionStart | Standing `decided` rows, one line each, capped at 30 rows / 3,000 chars; proposed as a count, superseded never |
+| `hooks/decision-guard.py` | PreToolUse Bash/Edit/Write/MultiEdit | Table shape on `docs/decisions.md` + archive: unique `DEC-n`, dates, status, a named person and channel on `decided`, live supersede targets. Blocks shell writes to the log. Fails closed. `HAMSTER_DECISION_GUARD=off` disables |
+| `skills/decisions` | `/decisions init\|record\|supersede\|archive\|mine` | The decision log; `mine` backfills `proposed` rows from past transcripts and handoffs |
 | `skills/handoff` | `/handoff`, `/handoff resume`, `/handoff done` | Durable session state instead of lossy compaction |
 | `/hamster:standup` | command | Where things stand: open Navigator tasks by status, the next one to pick up, what waits on humans. Read-only; handoff + git log without Navigator |
 | `/hamster:retro` | command | Manual retrospective; routes each fix to rule / skill / CLAUDE.md / memory / Navigator |

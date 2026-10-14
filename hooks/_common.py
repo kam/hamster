@@ -103,8 +103,8 @@ def is_tracked(path, cwd):
         return True  # unknown → treat as untrusted
 
 
-def ensure_excluded(common_dir):
-    """Append the exclude line to <git-common-dir>/info/exclude. Returns True
+def ensure_excluded(common_dir, line=EXCLUDE_LINE):
+    """Append `line` (default: the handoffs dir) to <git-common-dir>/info/exclude. Returns True
     only when the line is present afterwards. Worktrees and submodules share
     a common dir, so this works where `.git` is a file."""
     if not common_dir:
@@ -113,11 +113,11 @@ def ensure_excluded(common_dir):
         exclude = Path(common_dir) / "info" / "exclude"
         exclude.parent.mkdir(parents=True, exist_ok=True)
         existing = exclude.read_text(encoding="utf-8", errors="replace") if exclude.exists() else ""
-        if EXCLUDE_LINE in existing.splitlines():
+        if line in existing.splitlines():
             return True
         with open(exclude, "a", encoding="utf-8") as fh:
             fh.write(
-                ("" if existing.endswith("\n") or not existing else "\n") + EXCLUDE_LINE + "\n"
+                ("" if existing.endswith("\n") or not existing else "\n") + line + "\n"
             )
         return True
     except Exception:
