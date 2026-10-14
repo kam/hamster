@@ -229,8 +229,18 @@ def test_guard_archive_supersede_points_into_log(repo):
     ("cat docs/decisions.md", 0),
     ("grep DEC- docs/decisions.md > /tmp/out", 0),
     ("cp docs/decisions.md /tmp/backup.md", 0),
+    ("rm docs/decisions.md", 2),
+    ("perl -pi -e 's/a/b/' docs/decisions.md", 2),
+    ("sed --in-place 's/a/b/' docs/decisions.md", 2),
+    ("git checkout -- docs/decisions.md", 2),
+    ('cat x > "docs/decisions.md"', 2),
+    ('git commit -m "chore: move superseded rows -> docs/decisions/archive.md"', 0),
+    ('grep -n "tee" docs/decisions.md', 0),
+    ('rg "sed -i" docs/decisions.md', 0),
+    ("cat <<'EOF' | less\nrm docs/decisions.md\nEOF", 0),
 ])
 def test_guard_bash(repo, cmd, expect):
+    write_log(repo, "")
     assert run("decision-guard.py", {"cwd": str(repo), "tool_name": "Bash", "tool_input": {"command": cmd}})[0] == expect
 
 
@@ -239,6 +249,106 @@ def test_guard_ignores_other_files_and_disable(repo, monkeypatch):
     assert run("decision-guard.py", p)[0] == 0
     monkeypatch.setenv("HAMSTER_DECISION_GUARD", "off")
     assert guard_write(repo, "garbage |\n")[0] == 0
+
+
+# --- review round 1 -------------------------------------------------------------
+def test_escaped_pipe_is_one_cell(repo):
+    row = "| DEC-1 | 2026-10-13 | use a \\| b | w | r | Kam | chat | - | decided |\n"
+    code, _, err = guard_write(repo, row)
+    assert code == 0, err
+    write_log(repo, row)
+    out = run("decisions-load.py", {"cwd": str(repo)})[1]
+    assert "DEC-1" in out and "Malformed" not in out
+
+
+def test_foreign_decisions_md_is_left_alone(repo):
+    (repo / "docs").mkdir()
+    (repo / "docs/decisions.md").write_text("# ADR index\n\n- 0001 use postgres\n")
+    p = {"cwd": str(repo), "tool_name": "Edit", "tool_input": {
+        "file_path": str(repo / "docs/decisions.md"), "old_string": "postgres", "new_string": "sqlite"}}
+    assert run("decision-guard.py", p)[0] == 0
+    assert run("decision-guard.py", {"cwd": str(repo), "tool_name": "Bash",
+                                     "tool_input": {"command": "echo x >> docs/decisions.md"}})[0] == 0
+    assert run("decisions-load.py", {"cwd": str(repo)})[1] == ""
+    assert run("decision-capture.py", {"cwd": str(repo), "session_id": "s", "prompt": "agreed"})[1] == ""
+
+
+def test_write_removing_header_from_log_is_blocked(repo):
+    write_log(repo, "")
+    p = {"cwd": str(repo), "tool_name": "Write", "tool_input": {
+        "file_path": str(repo / "docs/decisions.md"), "content": "# gone\n"}}
+    assert run("decision-guard.py", p)[0] == 2
+
+
+GIT_LOG = (
+    "commit abc1234\nAuthor: A <a@x>\nDate:   Mon Oct 13\n\n    fix\n\n"
+    "commit def5678\nAuthor: B <b@x>\nDate:   Tue Oct 14\n\n    agreed fix\n"
+)
+CI_LOG = "\n".join(f"2026-10-14T10:00:{i:02d}Z step {i} confirmed ok" for i in range(30))
+CODE = "Reviewers: approved\n" + "\n".join(f"  {i}: x = foo({i});" for i in range(30))
+
+
+@pytest.mark.parametrize("text", [GIT_LOG, CI_LOG, CODE])
+def test_logs_and_git_output_are_not_sources(repo, text):
+    run("decision-capture.py", {"cwd": str(repo), "session_id": "s1", "prompt": paste(text)})
+    assert not (repo / ".claude/decisions").exists()
+
+
+def test_gitignore_negation_refuses_save(repo):
+    (repo / ".gitignore").write_text("!.claude/decisions/\n!.claude/decisions/**\n")
+    _, out, _ = run("decision-capture.py", {"cwd": str(repo), "session_id": "s1", "prompt": paste(EMAIL)})
+    assert "not git-ignored" in out and not (repo / ".claude/decisions/sources").exists()
+
+
+def test_two_repos_one_session(repo, tmp_path):
+    other = tmp_path / "other"
+    subprocess.run(["git", "init", "-q", str(other)], check=True)
+    run("decision-capture.py", {"cwd": str(repo), "session_id": "s1", "prompt": paste(EMAIL)})
+    src = next((repo / ".claude/decisions/sources").glob("*.txt"))
+    sha = src.stem.rsplit("-", 1)[1]
+    write_log(repo, f"| DEC-1 | 2026-10-13 | Stripe | w | r | Jane Smith | email | sha:{sha} | decided |\n")
+    run("decision-capture.py", {"cwd": str(other), "session_id": "s1",
+                                "prompt": paste(EMAIL.replace("Stripe", "Adyen"))})
+    code, _, err = run("decision-stop.py", {"session_id": "s1"})
+    assert code == 2 and str(other) in err and str(repo) + "/" not in err
+
+
+def test_ids_unique_across_log_and_archive(repo):
+    write_log(repo, "| DEC-1 | 2026-10-13 | Stripe | w | r | Kam | chat | - | decided |\n")
+    (repo / "docs/decisions").mkdir()
+    old = "| DEC-1 | 2026-10-01 | Paddle | w | r | Kam | chat | - | superseded by DEC-2 |\n"
+    assert guard_write(repo, old, name="docs/decisions/archive.md")[0] == 2
+    # the same row in both files mid-move is allowed
+    write_log(repo, old + "| DEC-2 | 2026-10-13 | Stripe | w | r | Kam | chat | - | decided |\n")
+    code, _, err = guard_write(repo, old, name="docs/decisions/archive.md")
+    assert code == 0, err
+
+
+def test_nested_paste_markers_pair_by_id():
+    sys.path.insert(0, str(HOOKS))
+    import _decisions as d
+
+    got = d.pastes('<pasted_content id="1">A <pasted_content id="2">B</pasted_content id="2"> C'
+                   '</pasted_content id="1">')
+    assert got == ['A <pasted_content id="2">B</pasted_content id="2"> C']
+
+
+def test_secret_in_row_is_blocked(repo):
+    row = "| DEC-1 | 2026-10-13 | key sk-ant-api03-abcdefghijklmnopqrstuv | w | r | Kam | chat | - | decided |\n"
+    code, _, err = guard_write(repo, row)
+    assert code == 2 and "secret" in err
+
+
+@pytest.mark.parametrize("who", ["Na Li", "Ai Tanaka", "Jane Smith (client)"])
+def test_real_names_pass(repo, who):
+    code, _, err = guard_write(repo, f"| DEC-1 | 2026-10-13 | x | w | r | {who} | chat | - | decided |\n")
+    assert code == 0, err
+
+
+def test_load_strips_markup_from_rows(repo):
+    write_log(repo, "| DEC-1 | 2026-10-13 | `run this` <b>now</b> | w | r | Kam | chat | - | decided |\n")
+    out = run("decisions-load.py", {"cwd": str(repo)})[1]
+    assert "run this now" in out and "`run" not in out and "<b>" not in out
 
 
 # --- mine -----------------------------------------------------------------------

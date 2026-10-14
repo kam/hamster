@@ -31,23 +31,26 @@ def main():
         return
     sid = data.get("session_id")
     state = load_state(sid)
-    top = state.get("top")
-    pending = [s for s in state.get("sources", []) if not s.get("nudged")]
-    if not top or not pending:
+    pending = [s for s in state.get("sources", []) if not s.get("nudged") and s.get("top")]
+    if not pending:
         return
-    cited = set()
-    for rel in (LOG, ARCHIVE):
-        cited |= set(SHA_RE.findall(read(Path(top) / rel) or ""))
-    missing = [s for s in pending if s["sha"] not in cited]
+    cited = {}  # repo top -> shas its log and archive cite
+    for top in {s["top"] for s in pending}:
+        cited[top] = set()
+        for rel in (LOG, ARCHIVE):
+            cited[top] |= set(SHA_RE.findall(read(Path(top) / rel) or ""))
+    missing = [s for s in pending if s["sha"] not in cited[s["top"]]]
     for s in pending:
         s["nudged"] = True
     save_state(sid, state)
     if not missing:
         return
-    listing = "\n".join(f"  - {s['kind']}: {s['path']} sha:{s['sha']}" for s in missing)
+    listing = "\n".join(
+        f"  - {s['kind']}: {os.path.join(s['top'], s['path'])} sha:{s['sha']}" for s in missing
+    )
     print(
         "hamster [decisions]: pasted source(s) saved this session have no row in "
-        f"{LOG}:\n{listing}\n"
+        f"their repo's {LOG}:\n{listing}\n"
         "Read each one. If it records a decision, add a row citing `<path> sha:<sha>` "
         "(`decided` only with the named person, channel and date; otherwise `proposed`). "
         "If none carries a decision, say so in one line and stop — this check fires once.",

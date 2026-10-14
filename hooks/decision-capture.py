@@ -29,10 +29,13 @@ try:
         CUE_RE,
         EXCLUDE,
         LOG,
+        excluded,
+        is_hamster_log,
         kind_of,
         load_state,
         outside_pastes,
         pastes,
+        read,
         save_source,
         save_state,
     )
@@ -63,10 +66,11 @@ def main():
 
     found = [(p, k) for p in pastes(prompt) for k in [kind_of(p)] if k]
     if found:
-        if not ensure_excluded(common, EXCLUDE):
+        if not (ensure_excluded(common, EXCLUDE) and excluded(top)):
             print(
                 f"hamster [decisions]: a pasted {found[0][1]} looks like a decision source, but "
-                f"{EXCLUDE} could not be git-excluded, so it was not saved. " + RECORD.format(log=LOG)
+                f"{EXCLUDE} is not git-ignored here (info/exclude failed or a .gitignore "
+                "rule un-ignores it), so it was not saved. " + RECORD.format(log=LOG)
             )
             return
         today = dt.date.today().isoformat()
@@ -75,9 +79,10 @@ def main():
         for text, kind in found:
             rel, sha = save_source(top, text, kind, today)
             if not any(s["sha"] == sha for s in state["sources"]):
-                state["sources"].append({"path": rel, "sha": sha, "kind": kind, "nudged": False})
+                state["sources"].append(
+                    {"path": rel, "sha": sha, "kind": kind, "top": top, "nudged": False}
+                )
             lines.append(f"  - {kind}: `{rel} sha:{sha}`")
-        state["top"] = top
         save_state(data.get("session_id"), state)
         print(
             "hamster [decisions]: pasted source saved (redacted, git-excluded):\n"
@@ -87,7 +92,7 @@ def main():
         )
         return
 
-    if (Path(top) / LOG).is_file():
+    if is_hamster_log(read(Path(top) / LOG)):
         m = CUE_RE.search(outside_pastes(prompt))
         state = load_state(data.get("session_id"))
         if m and state.get("cues", 0) < CUE_MAX:

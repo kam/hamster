@@ -8,8 +8,12 @@ Blocks (exit 2) a Write/Edit/MultiEdit whose resulting table would break:
   3. A `decided` row names a person in `Decided by` — not empty, not a placeholder, not an
      agent, model or "the client" — and a known Channel.
   4. `superseded by DEC-<n>` points at another row that exists in the log or the archive.
-Blocks a Bash command that writes either file (redirect, tee, sed -i, cp, mv): use Edit,
-so this guard sees the result.
+Blocks, best effort, a Bash command that writes either file (redirect, tee, sed/perl -i,
+cp, mv, rm, git checkout/restore): use Edit, so this guard sees the result. Quoted text and
+heredoc bodies are ignored; an interpreter writing the file (`python -c`) is not caught.
+
+Opt-in by header: a `docs/decisions.md` without the skill's header row (an ADR index,
+prose) is never checked, and a Write that removes the header from a log is.
 
 Shape, not truth: the guard cannot prove the named person decided. The record is
 honest when a `decided` row is written from that person's own message, email or
@@ -29,23 +33,34 @@ from pathlib import Path
 
 try:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from _decisions import ARCHIVE, COLUMNS, ID_RE, LOG, STATUS_RE, read, rows
+    from _common import redact
+    from _decisions import ARCHIVE, COLUMNS, ID_RE, LOG, STATUS_RE, is_hamster_log, read, rows
 except Exception:
     sys.exit(0)
 
 TARGET_RE = re.compile(r"(?:^|/)docs/decisions(?:\.md|/archive\.md)$")
+LOG_PATH = r"[^\s;&|<>'\"]*docs/decisions(?:\.md|/archive\.md)"
+LOG_PATH_RE = re.compile(LOG_PATH)
+CMD = r"(?:^|[;&|(]\s*|\b(?:sudo|xargs|env)\s+)"
+# Best effort, run on the command with quoted text and heredoc bodies blanked.
 BASH_WRITE_RE = re.compile(
-    r"(>\s*['\"]?[^\s;&|]*docs/decisions"
-    r"|\btee\b[^;&|]*docs/decisions"
-    r"|\bsed\s+-[A-Za-z]*i[^;&|]*docs/decisions"
-    r"|\b(?:cp|mv|rsync|install)\b[^;&|]*docs/decisions(?:\.md|/archive\.md)\s*(?:$|[;&|]))"
+    rf"(>>?\s*{LOG_PATH}"
+    rf"|{CMD}(?:tee|truncate|rm|shred|dd)\b[^;&|]*{LOG_PATH}"
+    rf"|{CMD}(?:sed|perl|ruby)\s+(?:-\S*\s+)*?-[A-Za-z]*i[^;&|]*{LOG_PATH}"
+    rf"|{CMD}sed\b[^;&|]*--in-place[^;&|]*{LOG_PATH}"
+    rf"|{CMD}(?:cp|mv|rsync|install|ln)\b[^;&|]*{LOG_PATH}\s*(?:$|[;&|)])"
+    rf"|{CMD}git\s+(?:checkout|restore)\b[^;&|]*{LOG_PATH})"
 )
+QUOTED_RE = re.compile(r"\"(?:[^\"\\]|\\.)*\"|'[^']*'")
+HEREDOC_RE = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?[^\n]*\n(.*?)\n\s*\1\b", re.S)
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 CHANNELS = {
     "chat", "askuserquestion", "email", "meeting", "call", "slack", "teams", "sms",
     "whatsapp", "signed", "workshop", "ticket", "pr review",
 }
-PLACEHOLDER_RE = re.compile(r"^\s*(\[|<|tbd|todo|n/?a\b|name\b|who\b|pending|-+$|\?)", re.I)
+PLACEHOLDER_RE = re.compile(
+    r"^\s*(\[.*\]|<.*>|tbd|todo|n/?a|name|who|pending|unknown|-+|\?+)\s*$", re.I
+)
 NOT_A_PERSON = {
     "claude", "claude code", "assistant", "the assistant", "session", "the session", "agent",
     "subagent", "ai", "the ai", "llm", "bot", "model", "system", "opus", "sonnet", "fable",
@@ -53,7 +68,7 @@ NOT_A_PERSON = {
     "team", "the team", "we", "us", "everyone", "stakeholders",
 }
 AGENT_SUBSTR_RE = re.compile(
-    r"claude|chatgpt|codex|subagent|\b(llm|ai|gpt|opus|sonnet|haiku|fable|agent|bot|assistant|model)\b",
+    r"claude|chatgpt|codex|subagent|\b(llm|gpt|opus|sonnet|haiku|agent|bot|assistant|model)\b",
     re.I,
 )
 
@@ -74,10 +89,32 @@ def is_person(who):
     return not AGENT_SUBSTR_RE.search(w)
 
 
-def check(text, other_ids):
+def strip_data(cmd):
+    """Blank heredoc bodies and quoted strings, keeping a quoted string that is
+    itself the log path (`tee "docs/decisions.md"`)."""
+    cmd = HEREDOC_RE.sub(lambda m: m.group(0).split("\n", 1)[0], cmd)
+
+    def keep_path(m):
+        inner = m.group(0)[1:-1]
+        return inner if LOG_PATH_RE.fullmatch(inner) else '""'
+
+    return QUOTED_RE.sub(keep_path, cmd)
+
+
+def bash_target_is_log(cmd, cwd):
+    for p in LOG_PATH_RE.findall(cmd):
+        p = os.path.expanduser(p)
+        if is_hamster_log(read(p if os.path.isabs(p) else os.path.join(cwd, p))):
+            return True
+    return False
+
+
+def check(text, other):
     table, header = rows(text)
     if not header:
         return "no table header row: | " + " | ".join(COLUMNS) + " |"
+    other_ids = {r.get("ID", "") for r in other}
+    other_by_id = {r.get("ID", ""): r for r in other}
     problems, seen = [], set()
     for r in table:
         where = f"line {r['_line']}"
@@ -89,7 +126,13 @@ def check(text, other_ids):
             problems.append(f"{where}: ID `{rid}` is not DEC-<n>")
         elif rid in seen:
             problems.append(f"{where}: duplicate ID {rid}")
+        elif rid in other_ids and other_by_id[rid] != {**r, "_line": other_by_id[rid]["_line"]}:
+            # The same row in both files is an archive move in progress.
+            problems.append(f"{where}: {rid} already used by a different row in the other file")
         seen.add(rid)
+        secret = [c for c in COLUMNS if redact(r[c]) != r[c]]
+        if secret:
+            problems.append(f"{where}: {', '.join(secret)} looks like it holds a secret; redact it")
         if not DATE_RE.match(r["Date"]):
             problems.append(f"{where}: Date `{r['Date']}` is not YYYY-MM-DD")
         if not r["Decision"]:
@@ -146,7 +189,10 @@ def main():
     ti = data.get("tool_input") or {}
     if tool == "Bash":
         cmd = str(ti.get("command") or "")
-        if "docs/decisions" in cmd and BASH_WRITE_RE.search(cmd):
+        if "docs/decisions" not in cmd:
+            return
+        bare = strip_data(cmd)
+        if BASH_WRITE_RE.search(bare) and bash_target_is_log(bare, data.get("cwd") or os.getcwd()):
             block("Bash writes to the decision log bypass this guard. Use Edit or Write.")
         return
     if tool not in ("Write", "Edit", "MultiEdit"):
@@ -159,11 +205,13 @@ def main():
         text = resulting_text(tool, ti, path)
         if text is None:
             return
+        if not is_hamster_log(read(path)) and not is_hamster_log(text):
+            return  # the repo's own docs/decisions.md, not this log
         is_log = path.name == "decisions.md"
         root = path.parents[1] if is_log else path.parents[2]  # the repo top
         sibling = root / (ARCHIVE if is_log else LOG)
         other, _ = rows(read(sibling) or "")
-        problem = check(text, {r.get("ID", "") for r in other})
+        problem = check(text, [r for r in other if not r.get("_bad")])
     except SystemExit:
         raise
     except Exception as exc:  # the target is the log: a broken guard is not an open gate

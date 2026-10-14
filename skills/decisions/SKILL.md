@@ -46,6 +46,8 @@ the standing `decided` rows at session start; `decision-guard.py` refuses a malf
 4. **One decision per row.** An email deciding three things gets three rows citing the same sha.
 5. **Conflicts surface, never resolve silently.** When new information contradicts a decided row, tell the user and draft a superseding `proposed` row.
 6. **Edit, not Bash.** The guard blocks shell writes to the log so every write is checked.
+8. **No secrets in rows.** The guard blocks a cell that matches hamster's secret scanner; quote around a key, never through it.
+9. **The header is the opt-in.** Hooks act only on a `docs/decisions.md` carrying this header row. A repo's own ADR index or prose file of that name is left alone; pick another path for it or adopt the format with init.
 7. **Gate logs stay where they are.** product-discovery `docs/product/DECISIONS.md`, design-skills `DECISIONS.md`, course-design `GATE_STATE.md` and dev-lead's ask ledger keep their gates. When one of them closes a gate that the project must remember, add a row here whose Source names that record. A handoff's Decisions section cites `DEC-<n>` instead of restating a row.
 
 ## init

@@ -24,8 +24,16 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "hooks"))
-from _common import claude_home, clip, ensure_excluded, repo_context  # noqa: E402
-from _decisions import CUE_RE, EXCLUDE, kind_of, outside_pastes, pastes, save_source  # noqa: E402
+from _common import claude_home, clip, ensure_excluded, is_tracked, repo_context  # noqa: E402
+from _decisions import (  # noqa: E402
+    CUE_RE,
+    EXCLUDE,
+    excluded,
+    kind_of,
+    outside_pastes,
+    pastes,
+    save_source,
+)
 
 LINE_CLIP = 300
 MAX_CUES = 200
@@ -76,8 +84,10 @@ def main():
     top, _, common = repo_context(a.cwd)
     if not top:
         sys.exit("not inside a git work tree")
-    if not ensure_excluded(common, EXCLUDE):
-        sys.exit(f"could not git-exclude {EXCLUDE}; refusing to write sources")
+    if not (ensure_excluded(common, EXCLUDE) and excluded(top)):
+        sys.exit(f"{EXCLUDE} is not git-ignored here; refusing to write sources")
+    if a.out and (is_tracked(Path(a.out).resolve(), top) or not excluded(top, a.out)):
+        sys.exit(f"--out {a.out} is tracked or not git-ignored; candidates hold third-party text")
     tdir = claude_home() / "projects" / re.sub(r"[/.]", "-", top)
     sources, cues = [], []
     for t in sorted(tdir.glob("*.jsonl")) if tdir.is_dir() else []:

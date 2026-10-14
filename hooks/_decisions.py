@@ -10,6 +10,8 @@ short quote, the path and a sha, never the source text.
 import hashlib
 import json
 import re
+import subprocess
+import time
 from pathlib import Path
 
 from _common import redact, state_dir
@@ -28,10 +30,16 @@ SHA_RE = re.compile(r"sha:([0-9a-f]{12})")
 
 # Claude Code wraps every paste in the prompt as
 #   <pasted_content id="…"> … </pasted_content id="…">
+# The closing tag repeats the id, so nested or adjacent pastes pair correctly.
 PASTE_RE = re.compile(
-    r"<pasted_content\b[^>]*>\n?(.*?)\n?</pasted_content\b[^>]*>", re.S | re.I
+    r"<pasted_content(\s[^>]*)?>\n?(.*?)\n?</pasted_content\1>", re.S | re.I
 )
 HEADER_RE = re.compile(r"^\s*>?\s*(from|to|cc|subject|sent|date):\s+\S", re.I | re.M)
+# A line that reads as a log, stack trace or code rather than prose.
+NOISE_LINE_RE = re.compile(
+    r"^\s*(\d{4}-\d{2}-\d{2}[T ]\d|\[?\d{2}:\d{2}:\d{2}|at \S+\(|File \"|[#$>] |commit [0-9a-f]{7,}"
+    r"|[{}()\[\];]|.*[{};]\s*$|.*\s(=|==|=>|->)\s)"
+)
 EMAIL_MARK_RE = re.compile(
     r"^\s*>?\s*(on .{4,200} wrote:\s*$|-{2,}\s*original message\s*-{2,}"
     r"|begin forwarded message:|-{5,}\s*forwarded message\s*-{5,})",
@@ -50,21 +58,36 @@ def pastes(prompt):
     """Paste bodies marked by Claude Code. With no markers, the whole prompt
     is a candidate only when it is email-shaped (a short paste may arrive
     unmarked)."""
-    found = PASTE_RE.findall(prompt or "")
+    found = [m.group(2) for m in PASTE_RE.finditer(prompt or "")]
     if found:
         return [p for p in found if p.strip()]
     return [prompt] if prompt and is_email(prompt) else []
 
 
 def is_email(text):
-    return len(HEADER_RE.findall(text or "")) >= 2 or bool(EMAIL_MARK_RE.search(text or ""))
+    """Two distinct header names, one of them From or Subject (a `git log`
+    paste repeats Date: only), or a reply / forward marker."""
+    names = {h.lower() for h in HEADER_RE.findall(text or "")}
+    if len(names) >= 2 and names & {"from", "subject"}:
+        return True
+    return bool(EMAIL_MARK_RE.search(text or ""))
+
+
+def prose_lines(text):
+    lines = [ln for ln in (text or "").splitlines() if ln.strip()]
+    return [ln for ln in lines if not NOISE_LINE_RE.match(ln) and len(ln.split()) >= 4], len(lines)
 
 
 def kind_of(paste):
     """'email', 'notes' (long paste carrying a decision cue) or None."""
     if is_email(paste):
         return "email"
-    if len(paste) >= PASTE_MIN and CUE_RE.search(paste):
+    if len(paste) < PASTE_MIN:
+        return None
+    prose, total = prose_lines(paste)
+    # Notes are mostly prose and carry the cue in a prose line; a CI log or
+    # `gh pr view` saying "APPROVED" is mostly noise lines.
+    if total and len(prose) * 2 >= total and any(CUE_RE.search(ln) for ln in prose):
         return "notes"
     return None
 
@@ -74,6 +97,27 @@ def outside_pastes(prompt):
 
 
 # --- sources -----------------------------------------------------------------
+def excluded(top, rel=SOURCES + "/x.txt"):
+    """True when git really ignores the sources dir (a `.gitignore` negation
+    outranks info/exclude)."""
+    try:
+        return subprocess.run(
+            ["git", "check-ignore", "-q", "--", rel], cwd=top, capture_output=True, timeout=5
+        ).returncode == 0
+    except Exception:
+        return False
+
+
+def prune_state(days=30):
+    cutoff = time.time() - days * 86400
+    for p in state_dir("decisions").glob("*.json"):
+        try:
+            if p.stat().st_mtime < cutoff:
+                p.unlink()
+        except OSError:
+            pass
+
+
 def save_source(top, text, kind, today):
     """Redact, cap, write once by content hash. Returns (relpath, sha12)."""
     body = redact(text.replace("\r", ""))
@@ -90,11 +134,21 @@ def save_source(top, text, kind, today):
 
 
 # --- the log -----------------------------------------------------------------
+CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
+
+
 def split_row(line):
+    """Cells of a table line; `\\|` is a literal pipe inside a cell."""
     s = line.strip()
-    if not (s.startswith("|") and s.endswith("|")):
+    if not (s.startswith("|") and s.endswith("|") and not s.endswith("\\|")):
         return None
-    return [c.strip() for c in s[1:-1].split("|")]
+    return [c.strip() for c in CELL_SPLIT_RE.split(s[1:-1])]
+
+
+def is_hamster_log(text):
+    """True when the file carries this skill's header row. A repo's own
+    `docs/decisions.md` (an ADR index, prose) is never touched."""
+    return rows(text or "")[1]
 
 
 def rows(text):
