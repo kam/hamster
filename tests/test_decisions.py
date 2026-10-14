@@ -354,6 +354,9 @@ def test_real_names_pass(repo, who):
     "Auth: passwordless magic links",
     "Session token: rotated every 24h",
     "docs/research/architecture/payments/stripe/webhooks.md",
+    "Ship the task-management-dashboard first",
+    "Use risk-based-authentication for admins",
+    "Bearer authentication/authorization on the API",
 ])
 def test_auth_decisions_are_not_secrets(repo, text):
     code, _, err = guard_write(repo, f"| DEC-1 | 2026-10-13 | {text} | w | r | Kam | chat | {text} | decided |\n")
