@@ -369,3 +369,231 @@ def test_q_flag_code_running_options_match_raw():
                 "printf 'x; navigator delete task/foo ' | sort --compress-program=sh -S 1",
                 "printf 'x; navigator delete task/foo ' | sort --comp=sh -S 1"):
         assert _rules.matches(rule, cmd), cmd
+
+
+# ---- rewrite rules (0.8.0) ----------------------------------------------------
+
+def _rewrite_rule(**kw):
+    base = {
+        "id": "quote-glob", "tool": "Bash", "field": "command",
+        "pattern": r"((?:^|\s)--include=)(?!['\"])([^\s'\"\\{}]*[*?\[][^\s'\"\\{}]*)",
+        "action": "rewrite", "replace": r'\1"\2"', "message": "quoted the glob",
+        "tests": [
+            {"input": "grep -r --include=*.md foo .", "expect": "rewrite",
+             "output": 'grep -r --include="*.md" foo .'},
+            {"input": "grep -r --include='*.md' foo .", "expect": "pass"},
+        ],
+    }
+    base.update(kw)
+    return base
+
+
+def _install(env, rule):
+    rules = env / "state" / "rules"
+    rules.mkdir(parents=True, exist_ok=True)
+    (rules / f"{rule['id']}.json").write_text(json.dumps(rule))
+    return rules
+
+
+def test_rewrite_emits_updated_input(env):
+    _install(env, _rewrite_rule())
+    r = guard("Bash", {"command": "grep -r --include=*.md foo .", "description": "d"})
+    assert r.returncode == 0 and r.stderr == ""
+    out = json.loads(r.stdout)["hookSpecificOutput"]
+    assert out["hookEventName"] == "PreToolUse"
+    assert out["updatedInput"] == {"command": 'grep -r --include="*.md" foo .', "description": "d"}
+    assert "permissionDecision" not in out
+    assert "hamster rewrote [quote-glob]: quoted the glob" in out["additionalContext"]
+    assert 'ran command: grep -r --include="*.md" foo .' in out["additionalContext"]
+    fires = json.loads((env / "state" / "rule-fires.json").read_text())
+    assert fires["quote-glob"]["count"] == 1
+
+
+def test_rewrite_pass_is_silent(env):
+    _install(env, _rewrite_rule())
+    r = guard("Bash", {"command": "grep -r --include='*.md' foo ."})
+    assert r.returncode == 0 and r.stdout == ""
+
+
+def test_rewrite_every_match_and_groups_from_original(env):
+    _install(env, _rewrite_rule())
+    r = guard("Bash", {"command": "grep -r --include=*.md --include=*.rb foo ."})
+    assert json.loads(r.stdout)["hookSpecificOutput"]["updatedInput"]["command"] == \
+        'grep -r --include="*.md" --include="*.rb" foo .'
+
+
+def test_rewrite_leaves_data_heredoc_alone(env):
+    _install(env, _rewrite_rule())
+    cmd = "cat > notes.sh <<'EOF'\ngrep -r --include=*.md foo .\nEOF\ngrep -r --include=*.rb bar ."
+    r = guard("Bash", {"command": cmd})
+    new = json.loads(r.stdout)["hookSpecificOutput"]["updatedInput"]["command"]
+    assert new == "cat > notes.sh <<'EOF'\ngrep -r --include=*.md foo .\nEOF\ngrep -r --include=\"*.rb\" bar ."
+    # a body fed to a shell is code and is rewritten
+    r = guard("Bash", {"command": "bash <<'EOF'\ngrep -r --include=*.md foo .\nEOF"})
+    assert '--include="*.md"' in json.loads(r.stdout)["hookSpecificOutput"]["updatedInput"]["command"]
+
+
+def test_rewrite_q_flag_skips_quoted_text_but_fills_groups_from_original():
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"field": "command", "flags": "q", "replace": r"\1navigator \2 --actor agent:claude-code",
+            "pattern": r"(^|[;&|(\n]\s*)navigator\s+(update|delete)\b(?!(?:'[^']*'|\"(?:[^\"\\]|\\.)*\"|[^;&|\n'\"])*--actor)"}
+    assert _rules.rewrite(rule, "grep -E 'x|navigator update' notes.txt") == (None, 0)
+    assert _rules.rewrite(rule, "navigator update task/x --set 'note=a; b'") == \
+        ("navigator update --actor agent:claude-code task/x --set 'note=a; b'", 0)
+    assert _rules.rewrite(rule, "navigator update task/x --actor human") == (None, 0)
+
+
+def test_block_beats_rewrite_in_one_call(env):
+    _install(env, _rewrite_rule())
+    r = guard("Bash", {"command": "chmod 777 x; grep -r --include=*.md foo ."})
+    assert r.returncode == 2 and r.stdout == "" and "chmod-777" in r.stderr
+
+
+def test_warn_rides_inside_rewrite_json(env):
+    _install(env, _rewrite_rule())
+    _install(env, {
+        "id": "warn-foo", "tool": "Bash", "field": "command", "pattern": r"\bfoo\b", "action": "warn",
+        "message": "foo noted", "tests": [{"input": "foo", "expect": "block"}, {"input": "x", "expect": "pass"}],
+    })
+    r = guard("Bash", {"command": "grep -r --include=*.md foo ."})
+    out = json.loads(r.stdout)  # stdout is JSON alone
+    assert "hamster warn [warn-foo]: foo noted" in out["hookSpecificOutput"]["additionalContext"]
+    r = guard("Bash", {"command": "grep foo x"})
+    assert r.stdout.strip() == "hamster warn [warn-foo]: foo noted"
+
+
+def test_untested_rewrite_downgrades_to_warn(env):
+    _install(env, _rewrite_rule(tests=[{"input": "grep -r --include=*.md foo .", "expect": "rewrite",
+                                        "output": 'grep -r --include="*.md" foo .'}]))
+    r = guard("Bash", {"command": "grep -r --include=*.md foo ."})
+    assert r.returncode == 0 and r.stdout.startswith("hamster warn [quote-glob] (untested rule, warn-only)")
+    assert cli("test").returncode == 1
+
+
+def test_rewrite_validation_and_tests(env):
+    bad = env / "bad.json"
+    bad.write_text(json.dumps(_rewrite_rule(replace=None)))
+    assert "needs `replace`" in cli("add", str(bad)).stdout
+    bad.write_text(json.dumps({**_rewrite_rule(), "action": "block"}))
+    assert "only belongs on a rewrite rule" in cli("add", str(bad)).stdout
+    bad.write_text(json.dumps(_rewrite_rule(tests=[{"input": "grep -r --include=*.md foo .", "expect": "block"},
+                                                    {"input": "x", "expect": "pass"}])))
+    assert "needs one test expecting rewrite" in cli("add", str(bad)).stdout
+    bad.write_text(json.dumps({**_rewrite_rule(action="block"), "tests": [
+        {"input": "grep -r --include=*.md foo .", "expect": "rewrite", "output": "x"}, {"input": "x", "expect": "pass"}]}))
+    assert "only belongs on a rewrite rule" in cli("add", str(bad)).stdout
+    bad.write_text(json.dumps(_rewrite_rule(replace=r"\1\3")))
+    assert "names group 3" in cli("add", str(bad)).stdout
+    bad.write_text(json.dumps(_rewrite_rule(replace=r"\g<nope>")))
+    assert "names group 'nope'" in cli("add", str(bad)).stdout
+    bad.write_text(json.dumps(_rewrite_rule(tests=[{"input": "grep -r --include=*.md foo .", "expect": "rewrite"},
+                                                    {"input": "x", "expect": "pass"}])))
+    assert "needs the exact `output`" in cli("add", str(bad)).stdout
+    bad.write_text(json.dumps(_rewrite_rule(tests=[
+        {"input": "grep -r --include=*.md foo .", "expect": "rewrite", "output": "grep -r --include='*.md' foo ."},
+        {"input": "x", "expect": "pass"}])))
+    r = cli("add", str(bad))
+    assert r.returncode == 1 and "wanted" in r.stdout and "got" in r.stdout
+    good = env / "good.json"
+    good.write_text(json.dumps(_rewrite_rule()))
+    assert cli("add", str(good)).returncode == 0
+    assert cli("test", "quote-glob").returncode == 0
+    out = cli("check", "Bash", "grep -r --include=*.md foo .").stdout
+    assert "rewrite quote-glob" in out and '→ grep -r --include="*.md" foo .' in out
+
+
+def test_rewrite_on_edit_file_path(env):
+    _install(env, {
+        "id": "tmp-to-scratch", "tool": ["Edit", "Write"], "field": "file_path", "pattern": r"^/tmp/(?=notes-)",
+        "action": "rewrite", "replace": "/tmp/scratch/", "message": "notes go under scratch",
+        "tests": [{"input": "/tmp/notes-1.md", "expect": "rewrite", "output": "/tmp/scratch/notes-1.md"},
+                  {"input": "/tmp/other.md", "expect": "pass"}],
+    })
+    r = guard("Write", {"file_path": "/tmp/notes-1.md", "content": "x"})
+    assert json.loads(r.stdout)["hookSpecificOutput"]["updatedInput"] == {"file_path": "/tmp/scratch/notes-1.md", "content": "x"}
+    assert guard("Read", {"file_path": "/tmp/notes-1.md"}).stdout == ""
+
+
+# ---- review r1: a rewrite must never land inside quoted text ------------------
+
+def test_rewrite_never_inserts_inside_quoted_text(env):
+    """r1 H2: inserting `"` into a string the shell runs executes what follows."""
+    _install(env, _rewrite_rule())
+    for cmd in ('echo "a --include=*;id; b"', 'git commit -m "docs: use --include=*.md here"',
+                "printf %s 'grep --include=*.md x' > notes.txt", 'bash -c "grep -r --include=*.md x ."'):
+        r = guard("Bash", {"command": cmd})
+        assert r.stdout == "", cmd
+        # data in a read-only call passes; anything else is refused (the old block)
+        if cmd.startswith(("echo", "printf")):
+            assert r.returncode == 0, cmd
+        else:
+            assert r.returncode == 2 and "quote-glob" in r.stderr, cmd
+    r = guard("Bash", {"command": 'echo "keep" --include=*.md'})
+    assert json.loads(r.stdout)["hookSpecificOutput"]["updatedInput"]["command"] == 'echo "keep" --include="*.md"'
+
+
+def test_rewrite_drops_nothing_from_a_blanked_span():
+    """r1 H1: a match that spans blanked text outside a copied group blocks."""
+    sys.path.insert(0, str(ROOT / "hooks"))
+    import _rules
+
+    rule = {"field": "command", "flags": "q", "pattern": r"echo\s+x", "replace": "echo y"}
+    assert _rules.rewrite(rule, 'echo "keep" x') == (None, 1)
+    rule = {"field": "command", "flags": "q", "pattern": r"echo(\s+)x", "replace": r"echo\1y"}
+    assert _rules.rewrite(rule, 'echo "keep" x') == ('echo "keep" y', 0)  # the group copies it back
+    # the group copies the quoted text back verbatim: safe
+    rule = {"field": "command", "pattern": r"find(\s.*?\s-o\s)", "replace": r"rtk proxy find\1"}
+    assert _rules.rewrite(rule, "find . -name 'a b' -o -name c") == ("rtk proxy find . -name 'a b' -o -name c", 0)
+    # a match wholly inside a heredoc body is data
+    rule = {"field": "command", "pattern": r"(^|\n)find ", "replace": r"\1rtk proxy find "}
+    assert _rules.rewrite(rule, "cat > s <<'EOF'\nfind . -o x\nEOF") == (None, 0)
+
+
+def test_rewritten_call_still_faces_block_rules(env):
+    """r1 N2: the rewritten command is re-evaluated; a block there wins."""
+    _install(env, {
+        "id": "expand-home", "tool": "Bash", "field": "command", "pattern": r"^rm -rf HOMEDIR$",
+        "action": "rewrite", "replace": "rm -rf ~", "message": "m",
+        "tests": [{"input": "rm -rf HOMEDIR", "expect": "rewrite", "output": "rm -rf ~"}, {"input": "x", "expect": "pass"}],
+    })
+    r = guard("Bash", {"command": "rm -rf HOMEDIR"})
+    assert r.returncode == 2 and "rm-rf-root-or-home" in r.stderr and r.stdout == ""
+
+
+def test_rewrite_content_rule_reaches_new_string(env):
+    """r1 N3: an Edit carries new_string, not content."""
+    _install(env, {
+        "id": "no-pry", "tool": ["Edit", "Write"], "field": "content", "pattern": r"binding\.pry\n",
+        "action": "rewrite", "replace": "", "message": "pry removed",
+        "tests": [{"input": "x\nbinding.pry\ny", "expect": "rewrite", "output": "x\ny"}, {"input": "x", "expect": "pass"}],
+    })
+    r = guard("Edit", {"file_path": "/a.rb", "old_string": "x", "new_string": "x\nbinding.pry\ny"})
+    assert json.loads(r.stdout)["hookSpecificOutput"]["updatedInput"]["new_string"] == "x\ny"
+
+
+def test_rewrite_block_test_kind(env):
+    """A rewrite rule may carry a `block` test for a shape it refuses."""
+    good = env / "good.json"
+    good.write_text(json.dumps(_rewrite_rule(tests=_rewrite_rule()["tests"] + [
+        {"input": 'git commit -m "x --include=*.md"', "expect": "block"},
+        {"input": 'echo "x --include=*.md"', "expect": "pass"}])))
+    r = cli("add", str(good))
+    assert r.returncode == 0, r.stdout
+    out = cli("check", "Bash", 'git commit -m "x --include=*.md"').stdout
+    assert "blocks: the rewrite would land inside quoted text" in out
+
+
+def test_rewrite_refuses_nested_substitution_quotes(env):
+    """r2 H1: quotes inside `$(…)` within a double-quoted string defeat the flat
+    lexer; such a call blocks on any match instead of being rewritten."""
+    _install(env, _rewrite_rule())
+    for cmd in ('echo "$(echo "a --include=*;id; b")"', 'echo "`echo "a --include=*;id; b"`"',
+                'git commit -m "$(printf "%s" "a --include=*;id; b")"', "echo $'it\\'s --include=*.md x'",
+                'echo "${X:-"a --include=*.md"}"'):
+        r = guard("Bash", {"command": cmd})
+        assert r.returncode == 2 and r.stdout == "" and "quote-glob" in r.stderr, cmd
+    # an unquoted substitution still rewrites
+    r = guard("Bash", {"command": "echo $(grep -r --include=*.md foo .)"})
+    assert json.loads(r.stdout)["hookSpecificOutput"]["updatedInput"]["command"] == 'echo $(grep -r --include="*.md" foo .)'

@@ -1,5 +1,5 @@
 {
-  "description": "hamster — capture tool failures (PostToolUseFailure), one-step retro on Stop when errors pile up, handoff load + memory decay + rule recall at SessionStart, handoff auto-snapshot before compaction, deterministic rule guards on Bash/Edit/Write, and cold-cache cost guards on SendMessage (idle agent) and UserPromptSubmit (idle chat). Decision log: pasted client emails/notes saved as git-excluded sources, a once-only stop check that each has a row, standing decisions loaded at session start, and a shape guard on docs/decisions.md (fails closed). Every other hook fails open.",
+  "description": "hamster — capture tool failures (PostToolUseFailure), one-step retro on Stop when errors pile up, handoff load + memory decay + rule recall at SessionStart, handoff auto-snapshot before compaction, deterministic rule guards on Bash/Edit/Write (block, warn, or rewrite the call in place), and cold-cache cost guards on SendMessage (idle agent) and UserPromptSubmit (idle chat). Decision log: pasted client emails/notes saved as git-excluded sources, a once-only stop check that each has a row, standing decisions loaded at session start, and a shape guard on docs/decisions.md (fails closed). Every other hook fails open.",
   "hooks": {
     "PreToolUse": [
       {
