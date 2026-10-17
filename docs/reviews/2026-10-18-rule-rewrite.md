@@ -1,4 +1,4 @@
-APPROVED: feature/rule-rewrite at 3a7b9f4 (hamster 0.8.0). pytest 187 passed, rules.py test 10/10.
+APPROVED: feature/rule-rewrite at 3a7b9f4 (hamster 0.8.0). pytest 187 passed, rules.py test 10/10, test_hooks.sh 38/38.
 Reviewer: separate opus general-purpose agent; it did not write the diff. 3 rounds, 2026-10-18.
 Spec: NO-SPEC. Origin: handoff 2026-10-18-main-guard-false-positives (329 October blocks from three mechanical hamster rules); Kam: "Let's work on the three hamster rules".
 Scope: `rewrite` action in the rule engine (PreToolUse `updatedInput` + `additionalContext`). The three live rules at ~/.claude/hamster/rules/ were converted outside the merge, plus a new block rule `unquoted-include-brace`.
