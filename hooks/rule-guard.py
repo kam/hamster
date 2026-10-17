@@ -70,7 +70,7 @@ def main():
             continue
         new, unsafe = rewrite(r, value)
         if unsafe:
-            blocks.append(r)
+            blocks.append({**r, "message": r["message"] + " (not rewritten: the match touches quoted text — write it that way yourself)"})
             continue
         if new is None:
             continue
