@@ -317,11 +317,27 @@ def _protected(cmd):
     return mask
 
 
+_NESTED = re.compile(r"\$\(|`|\$\{")
+
+
+def _lexable(cmd):
+    """False when the flat quote lexer cannot be trusted: a quoted span that
+    carries a substitution (`"$(echo "a")"` nests quotes the lexer ends at
+    the first inner `"`), or a `$'…'` string. Such a call is never rewritten."""
+    if "$'" in cmd:
+        return False
+    for m in _QUOTED.finditer(blank_heredocs(cmd)):
+        if m.group(0)[0] in "\"`" and _NESTED.search(m.group(0)):
+            return False
+    return True
+
+
 def rewrite(rule, value):
     """`(new_value, unsafe)`: `value` with every safe match replaced (None
     when nothing changes), and the number of matches that were left alone
     because the rewrite would have landed inside protected text — those
-    calls block, as a block rule would. Data heredoc bodies and (flag q)
+    calls block, as a block rule would. A call the flat quote lexer cannot
+    read (`_lexable`) blocks on any match. Data heredoc bodies and (flag q)
     quoted strings are matched as blanks of the same length, so the groups
     copied back come from the real command. A match is safe when no part
     of its span outside a copied group is protected; a match that lies
@@ -330,11 +346,14 @@ def rewrite(rule, value):
     command = rule["field"] == "command"
     text = blank_heredocs(value) if command else value
     text = _inspectable(rule, text)
+    found = list(_regex(rule).finditer(text))
+    if command and found and not _lexable(value):
+        return None, len(found)
     mask = _protected(value) if command else [False] * len(value)
     copied = template_groups(rule["replace"])
     data_ok = command and _quotes_are_data(value)
     out, pos, unsafe = [], 0, 0
-    for m in _regex(rule).finditer(text):
+    for m in found:
         span = range(m.start(), m.end())
         hit = [i for i in span if mask[i]]
         if hit:

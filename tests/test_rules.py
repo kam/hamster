@@ -583,3 +583,17 @@ def test_rewrite_block_test_kind(env):
     assert r.returncode == 0, r.stdout
     out = cli("check", "Bash", 'git commit -m "x --include=*.md"').stdout
     assert "blocks: the rewrite would land inside quoted text" in out
+
+
+def test_rewrite_refuses_nested_substitution_quotes(env):
+    """r2 H1: quotes inside `$(…)` within a double-quoted string defeat the flat
+    lexer; such a call blocks on any match instead of being rewritten."""
+    _install(env, _rewrite_rule())
+    for cmd in ('echo "$(echo "a --include=*;id; b")"', 'echo "`echo "a --include=*;id; b"`"',
+                'git commit -m "$(printf "%s" "a --include=*;id; b")"', "echo $'it\\'s --include=*.md x'",
+                'echo "${X:-"a --include=*.md"}"'):
+        r = guard("Bash", {"command": cmd})
+        assert r.returncode == 2 and r.stdout == "" and "quote-glob" in r.stderr, cmd
+    # an unquoted substitution still rewrites
+    r = guard("Bash", {"command": "echo $(grep -r --include=*.md foo .)"})
+    assert json.loads(r.stdout)["hookSpecificOutput"]["updatedInput"]["command"] == 'echo $(grep -r --include="*.md" foo .)'
