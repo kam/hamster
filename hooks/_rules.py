@@ -6,10 +6,16 @@ A rule is one JSON file. Sources, in load order (later ids override earlier):
   2. ~/.claude/hamster/rules/*.json     user
   3. <git toplevel>/.claude/hamster/rules/*.json   project (committed, shared)
 
-Required keys: id, tool, field, pattern, action (block|warn), message, tests.
+Required keys: id, tool, field, pattern, action (block|warn|rewrite), message, tests.
 A `block` rule with no test of each kind (expect block AND expect pass) is
 downgraded to `warn` at load and flagged `untested` — a guard nobody has
-proven is a nuisance, not a rule. Optional: event (default PreToolUse),
+proven is a nuisance, not a rule. A `rewrite` rule carries `replace` (a Python
+re.sub template, `\\1` / `\\g<name>` groups) and the hook substitutes it into
+the field instead of blocking: the call runs rewritten (PreToolUse
+`updatedInput`), and the message reaches Claude as `additionalContext`. Its
+tests expect `rewrite` with the exact `output`, plus `pass`; untested, it is
+warn-only like a block. Heredoc bodies that are data and (with flag `q`)
+quoted strings are never rewritten. Optional: event (default PreToolUse),
 flags ("i" for case-insensitive; "q" blanks quoted strings before matching, but
 only when every command in the call is a bare read-only one — grep, rg, echo,
 printf, head, tail, wc, uniq, cut, tr — so a verb inside a grep pattern or a message
@@ -35,7 +41,8 @@ from _common import git, state_dir  # noqa: E402
 
 REQUIRED = ("id", "tool", "field", "pattern", "action", "message", "tests")
 WHEN_KEYS = ("files_exist", "path_glob", "branch", "branch_not")
-ACTIONS = ("block", "warn")
+ACTIONS = ("block", "warn", "rewrite")
+EXPECTS = ("block", "pass", "rewrite")
 ID_RX = re.compile(r"^[a-z0-9][a-z0-9-]{1,60}$")
 FIRES = state_dir("rule-fires.json")
 
@@ -54,6 +61,20 @@ def strip_heredocs(cmd):
         if _SHELL.search(cmd[line_start : m.start()]) or _SHELL.search(tail):
             return m.group(0)
         return m.group(0)[: m.start(3) - m.start()] + "\n" + m.group(2)
+
+    return _HEREDOC.sub(repl, cmd)
+
+
+def blank_heredocs(cmd):
+    """Like strip_heredocs, but length-preserving: a data body becomes spaces,
+    so a match position on the result is the same position in `cmd`."""
+    def repl(m):
+        line_start = cmd.rfind("\n", 0, m.start()) + 1
+        tail = cmd[m.end(2) + len(m.group(1)) : m.start(3)]
+        if _SHELL.search(cmd[line_start : m.start()]) or _SHELL.search(tail):
+            return m.group(0)
+        head = m.group(0)[: m.start(3) - m.start()]
+        return head + " " * (m.end(3) - m.start(3)) + m.group(0)[m.end(3) - m.start() :]
 
     return _HEREDOC.sub(repl, cmd)
 
@@ -87,6 +108,11 @@ def validate(rule):
         re.compile(rule["pattern"], re.I if "i" in str(rule.get("flags", "")) else 0)
     except re.error as e:
         problems.append(f"pattern does not compile: {e}")
+    rewrite_rule = rule["action"] == "rewrite"
+    if rewrite_rule and not isinstance(rule.get("replace"), str):
+        problems.append("a rewrite rule needs `replace` (a re.sub template)")
+    elif "replace" in rule and not rewrite_rule:
+        problems.append("`replace` only belongs on a rewrite rule")
     when = rule.get("when")
     if when is not None:
         if not isinstance(when, dict):
@@ -103,14 +129,20 @@ def validate(rule):
         problems.append("tests must be a list")
     else:
         for t in tests:
-            if not isinstance(t, dict) or "input" not in t or t.get("expect") not in ("block", "pass"):
-                problems.append(f"bad test {t!r}: needs input + expect block|pass")
+            if not isinstance(t, dict) or "input" not in t or t.get("expect") not in EXPECTS:
+                problems.append(f"bad test {t!r}: needs input + expect block|pass|rewrite")
+            elif t["expect"] == "rewrite" and not isinstance(t.get("output"), str):
+                problems.append(f"bad test {t!r}: expect rewrite needs the exact `output`")
+            elif (t["expect"] == "rewrite") != rewrite_rule and t["expect"] != "pass":
+                problems.append(f"bad test {t!r}: a {rule['action']} rule's tests expect "
+                                f"{'rewrite' if rewrite_rule else 'block'}|pass")
     return problems
 
 
 def is_tested(rule):
     kinds = {t.get("expect") for t in rule.get("tests", []) if isinstance(t, dict)}
-    return {"block", "pass"} <= kinds
+    fires = "rewrite" if rule.get("action") == "rewrite" else "block"
+    return {fires, "pass"} <= kinds
 
 
 def load_rules(cwd=None):
@@ -216,11 +248,55 @@ def _quotes_are_data(text):
     return True
 
 
-def matches(rule, text):
+def _regex(rule):
     opts = str(rule.get("flags", ""))
-    if "q" in opts and _quotes_are_data(text):
-        text = blank_quotes(text)
-    return re.search(rule["pattern"], text, (re.I if "i" in opts else 0) | re.M) is not None
+    return re.compile(rule["pattern"], (re.I if "i" in opts else 0) | re.M)
+
+
+def _inspectable(rule, text):
+    """`text` with quoted strings blanked when flag q applies (length-preserving)."""
+    if "q" in str(rule.get("flags", "")) and _quotes_are_data(text):
+        return blank_quotes(text)
+    return text
+
+
+def matches(rule, text):
+    return _regex(rule).search(_inspectable(rule, text)) is not None
+
+
+_TEMPLATE = re.compile(r"\\(\d+)|\\g<(\w+)>|\\\\")
+
+
+def _expand(template, m, original):
+    """`template` with `\\N` / `\\g<name>` filled from `original` at the match's
+    group spans — the match was made on blanked text, the groups come from the
+    real command. `\\\\` is one backslash."""
+    def repl(t):
+        if t.group(0) == "\\\\":
+            return "\\"
+        g = t.group(1) or t.group(2)
+        g = int(g) if g.isdigit() else g
+        start, end = m.span(g)
+        return original[start:end] if start != -1 else ""
+
+    return _TEMPLATE.sub(repl, template)
+
+
+def rewrite(rule, value):
+    """`value` with every match of the rule replaced, or None when nothing
+    changes. Data heredoc bodies and (flag q) quoted strings are matched as
+    blanks of the same length, so the substitution lands on the real text and
+    never inside them."""
+    text = blank_heredocs(value) if rule["field"] == "command" else value
+    text = _inspectable(rule, text)
+    out, pos = [], 0
+    for m in _regex(rule).finditer(text):
+        out.append(value[pos:m.start()])
+        out.append(_expand(rule["replace"], m, value))
+        pos = m.end()
+    out.append(value[pos:])
+    new = "".join(out)
+    return new if new != value else None
 
 
 def context(cwd=None):
@@ -319,5 +395,9 @@ def run_tests(rule):
         tool = rule["tool"] if isinstance(rule["tool"], str) else rule["tool"][0]
         text = rule_input(rule, tool, {rule["field"]: t["input"]})
         fired = text is not None and matches(rule, text)
-        out.append((t, fired == (t["expect"] == "block")))
+        if t["expect"] == "rewrite":
+            ok = fired and rewrite(rule, t["input"]) == t.get("output")
+        else:
+            ok = fired == (t["expect"] == "block")
+        out.append((t, ok))
     return out

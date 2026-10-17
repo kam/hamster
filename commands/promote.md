@@ -24,18 +24,18 @@ Write `/tmp/hamster-rule-<id>.json` in this format (`${CLAUDE_PLUGIN_ROOT}/rules
   "tool": "Bash",                 // or Edit | Write | ["Edit","Write"]
   "field": "command",             // Bash: command; Edit/Write: file_path or content
   "pattern": "<python regex>",    // "flags": "i" case-insensitive, "q" ignore quoted text in grep/rg/echo-only calls
-  "action": "block",              // or warn
+  "action": "block",              // or warn, or rewrite (then add "replace": "<re.sub template>")
   "message": "<what to do instead, one sentence>",
   "source": "memory:<name>" | "solutions/<slug>" | "text",
   "keep": false,                  // true = never listed for pruning (hard-safety rules)
   "tests": [
-    {"input": "<the exact bad shape>", "expect": "block"},
+    {"input": "<the exact bad shape>", "expect": "block"},   // rewrite rules: "expect": "rewrite", "output": "<exact result>"
     {"input": "<a near-miss that must still work>", "expect": "pass"}
   ]
 }
 ```
 
-At least one `block` and one `pass` test (that is what makes a rule *tested*); add more `pass` tests than you think you need — each is a legitimate command the rule must not touch. Prefer `warn` when the bad shape is sometimes right.
+At least one `block` and one `pass` test (that is what makes a rule *tested*); add more `pass` tests than you think you need — each is a legitimate command the rule must not touch. Prefer `warn` when the bad shape is sometimes right. Prefer `rewrite` when the fix is mechanical and always the same (quote a glob, add a required flag): the call then runs corrected instead of costing a round-trip.
 
 ## 3. Prove it, then install
 

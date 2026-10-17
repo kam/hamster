@@ -16,7 +16,7 @@ The premise: a lesson that lives as prose gets forgotten. A lesson that lives as
 |---|---|---|
 | `hooks/tool-failure-log.py` | PostToolUseFailure | One JSONL line per failed tool call, `~/.claude/hamster/session-errors/` |
 | `hooks/error-retro.py` | Stop | After 8 new errors, blocks the stop once and asks for the one durable lesson. Fingerprint ledger says "seen in N sessions across M projects". |
-| `hooks/rule-guard.py` | PreToolUse Bash/Edit/Write | Applies every rule; `block` = exit 2 with the message, `warn` = note. Counts fires. |
+| `hooks/rule-guard.py` | PreToolUse Bash/Edit/Write | Applies every rule; `block` = exit 2 with the message, `rewrite` = the call runs substituted (`updatedInput`) and Claude is told what ran, `warn` = note. Counts fires. |
 | `hooks/wake-guard.py` | PreToolUse SendMessage | Blocks, once, a message to a sub-agent idle past its ~5-minute cache with 60k+ tokens; states the re-write cost. The same send again within 10 minutes passes. `HAMSTER_WAKE_GUARD=0` disables. |
 | `hooks/stale-guard.py` | UserPromptSubmit | Blocks, once, the first prompt into a chat idle past its ~1-hour cache with 100k+ tokens; states the cost and the choice (`/clear`, or send again). Slash commands pass. `HAMSTER_STALE_GUARD=0` disables. |
 | `hooks/rules-recall.py` | SessionStart | One line: rules active, untested, stale. Plus earlier Navigator lessons for this repo. |
@@ -63,6 +63,25 @@ Optional `when` gate, checked before the pattern (all keys AND-ed):
 ```
 
 `files_exist` is the stack check (Gemfile = Ruby, Cargo.toml = Rust) — no language list to maintain. `path_glob` scopes Edit/Write rules to a folder (`*` stops at `/`, `**` crosses directories; Bash has no path, so `path_glob` is rejected there); `branch` / `branch_not` relax or tighten by branch. `keep: true` exempts a rule from pruning; `created` defaults to the file's date.
+
+A mechanical fix — a flag to quote, a prefix to add — is a `rewrite` rule: `replace` is a Python `re.sub` template over the pattern's groups, the hook substitutes it and the call runs as rewritten, and its tests expect `rewrite` with the exact `output`. Something a human must change course on stays `block`.
+
+```json
+{
+  "id": "unquoted-include-glob",
+  "tool": "Bash", "field": "command",
+  "pattern": "((?:^|\\s)--(?:include|exclude|exclude-dir|glob)=)(?!['\"])([^\\s'\"\\\\{}]*[*?\\[][^\\s'\"\\\\{}]*)",
+  "action": "rewrite",
+  "replace": "\\1\"\\2\"",
+  "message": "zsh globs an unquoted --include=*.md; quoted for you.",
+  "tests": [
+    {"input": "grep -rn --include=*.md foo .", "expect": "rewrite", "output": "grep -rn --include=\"*.md\" foo ."},
+    {"input": "grep -rn --include='*.md' foo .", "expect": "pass"}
+  ]
+}
+```
+
+A rewrite is emitted as PreToolUse `updatedInput`; Claude sees the rule's message and the command that ran as `additionalContext`, the transcript keeps the original. When another hook (RTK) also rewrites the call, which `updatedInput` wins is undocumented — on Claude Code 2.1.302 hamster's was applied every time; a `block` in the same call always wins over a rewrite.
 
 `python3 scripts/rules.py add rule.json` validates, runs the tests, and refuses on red. `check Bash "<cmd>"` is a dry run. Heredoc bodies that are data never trip a pattern; bodies piped to a shell do.
 

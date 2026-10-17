@@ -5,7 +5,7 @@
   rules.py test [id]                  run keep-tests; exit 1 on any failure or invalid file
   rules.py add <file.json> [--scope user|project] [--force]
                                       validate + run tests, then install (refuses on red)
-  rules.py check <tool> <input>       dry-run: which rules fire on this input
+  rules.py check <tool> <input>       dry-run: which rules fire on this input (and a rewrite's result)
   rules.py prune [--days 60] [--json] user/project rules created >= N days ago with zero fires (defaults and keep:true exempt)
   rules.py rm <id>                    delete a user/project rule file (never default)
 """
@@ -26,6 +26,7 @@ from _rules import (  # noqa: E402
     load_fires,
     load_rules,
     prunable,
+    rewrite,
     rule_dirs,
     run_tests,
     validate,
@@ -84,8 +85,9 @@ def cmd_test(args):
         if args.id and r["id"] != args.id:
             continue
         if not is_tested(r):
-            print(f"UNTESTED {r['id']}: needs one `block` and one `pass` test (loads as warn)")
-            if r["action"] == "block":
+            fires = "rewrite" if r["action"] == "rewrite" else "block"
+            print(f"UNTESTED {r['id']}: needs one `{fires}` and one `pass` test (loads as warn)")
+            if r["action"] != "warn":
                 failed += 1
             continue
         ok, results = _run(r)
@@ -95,6 +97,8 @@ def cmd_test(args):
             for t, good in results:
                 if not good:
                     print(f"       expected {t['expect']} for: {t['input']!r}")
+                    if t["expect"] == "rewrite":
+                        print(f"       wanted {t.get('output')!r}, got {rewrite(r, t['input'])!r}")
     return 1 if failed else 0
 
 
@@ -109,14 +113,17 @@ def cmd_add(args):
     if probs:
         print("invalid rule: " + "; ".join(probs))
         return 1
-    if not is_tested(rule) and rule["action"] == "block":
-        print("refused: a `block` rule needs one test expecting block and one expecting pass")
+    if not is_tested(rule) and rule["action"] != "warn":
+        fires = "rewrite" if rule["action"] == "rewrite" else "block"
+        print(f"refused: a `{rule['action']}` rule needs one test expecting {fires} and one expecting pass")
         return 1
     ok, results = _run(rule)
     if not ok:
         for t, good in results:
             if not good:
                 print(f"FAIL expected {t['expect']} for: {t['input']!r}")
+                if t["expect"] == "rewrite":
+                    print(f"     wanted {t.get('output')!r}, got {rewrite(rule, t['input'])!r}")
         return 1
     dest_dir = dict(rule_dirs()).get(args.scope)
     if dest_dir is None:
@@ -145,7 +152,9 @@ def cmd_check(args):
         print("no rule fires")
         return 0
     for r, action in hits:
-        print(f"{action:<5} {r['id']}: {r['message']}")
+        print(f"{action:<7} {r['id']}: {r['message']}")
+        if action == "rewrite":
+            print(f"        → {rewrite(r, args.input)}")
     return 0
 
 
