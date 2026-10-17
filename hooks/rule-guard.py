@@ -7,7 +7,9 @@
             changed) and `additionalContext` naming the rule and the command
             that ran. No `permissionDecision`: the normal permission flow
             still decides whether the rewritten call is allowed. A block in
-            the same call wins and no rewrite is emitted.
+            the same call wins and no rewrite is emitted; a rewrite that
+            would land inside quoted text blocks instead; the rewritten
+            call is run through the block rules again before it is emitted.
 `warn`    → message on stdout, call proceeds; folded into the JSON when a
             rewrite is emitted (stdout must then be JSON alone).
 Another PreToolUse hook may rewrite the same call (RTK's `rtk hook claude`
@@ -38,7 +40,8 @@ def main():
     if not isinstance(tool_input, dict):
         return
     cwd = data.get("cwd")
-    hits = evaluate(load_rules(cwd), tool, tool_input, context(cwd))
+    rules, ctx = load_rules(cwd), context(cwd)
+    hits = evaluate(rules, tool, tool_input, ctx)
     if not hits:
         return
     blocks, warns, rewrites = [], [], []
@@ -60,15 +63,27 @@ def main():
     changed = []
     for r in rewrites:
         field = r["field"]
+        if field == "content" and "content" not in updated and "new_string" in updated:
+            field = "new_string"
         value = updated.get(field)
         if not isinstance(value, str):
             continue
-        new = rewrite(r, value)
+        new, unsafe = rewrite(r, value)
+        if unsafe:
+            blocks.append(r)
+            continue
         if new is None:
             continue
         updated[field] = new
         changed.append(field)
         notes.append(f"hamster rewrote [{r['id']}]: {r['message']}")
+    if changed:
+        # The rewritten call must clear every block rule too.
+        blocks += [r for r, a in evaluate(rules, tool, updated, ctx) if a == "block"]
+    if blocks:
+        for r in blocks:
+            print(f"hamster blocked [{r['id']}]: {r['message']}", file=sys.stderr)
+        sys.exit(2)
     if not changed:
         for line in notes:
             print(line)

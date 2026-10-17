@@ -64,7 +64,7 @@ Optional `when` gate, checked before the pattern (all keys AND-ed):
 
 `files_exist` is the stack check (Gemfile = Ruby, Cargo.toml = Rust) — no language list to maintain. `path_glob` scopes Edit/Write rules to a folder (`*` stops at `/`, `**` crosses directories; Bash has no path, so `path_glob` is rejected there); `branch` / `branch_not` relax or tighten by branch. `keep: true` exempts a rule from pruning; `created` defaults to the file's date.
 
-A mechanical fix — a flag to quote, a prefix to add — is a `rewrite` rule: `replace` is a Python `re.sub` template over the pattern's groups, the hook substitutes it and the call runs as rewritten, and its tests expect `rewrite` with the exact `output`. Something a human must change course on stays `block`.
+A mechanical fix — a flag to quote, a prefix to add — is a `rewrite` rule: `replace` is a Python `re.sub` template over the pattern's groups, the hook substitutes it and the call runs as rewritten, and its tests expect `rewrite` with the exact `output` (plus `pass`, and `block` for a shape it refuses). A rewrite never lands inside a quoted string, a comment or a data heredoc body: a match wholly inside one is data (skipped in a read-only call, refused in any other), a match that straddles one is refused, and the rewritten command is run through the block rules again before it is emitted. Something a human must change course on stays `block`.
 
 ```json
 {

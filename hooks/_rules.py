@@ -13,9 +13,12 @@ proven is a nuisance, not a rule. A `rewrite` rule carries `replace` (a Python
 re.sub template, `\\1` / `\\g<name>` groups) and the hook substitutes it into
 the field instead of blocking: the call runs rewritten (PreToolUse
 `updatedInput`), and the message reaches Claude as `additionalContext`. Its
-tests expect `rewrite` with the exact `output`, plus `pass`; untested, it is
-warn-only like a block. Heredoc bodies that are data and (with flag `q`)
-quoted strings are never rewritten. Optional: event (default PreToolUse),
+tests expect `rewrite` with the exact `output`, plus `pass` (and `block` for
+a shape the rule refuses); untested, it is warn-only like a block. A match
+whose replaced text would land inside a quoted string, a comment or a data
+heredoc body is never rewritten: a match wholly inside such text is data
+(skipped when every command is read-only, else the call blocks); one that
+straddles it blocks. Optional: event (default PreToolUse),
 flags ("i" for case-insensitive; "q" blanks quoted strings before matching, but
 only when every command in the call is a bare read-only one — grep, rg, echo,
 printf, head, tail, wc, uniq, cut, tr — so a verb inside a grep pattern or a message
@@ -113,6 +116,11 @@ def validate(rule):
         problems.append("a rewrite rule needs `replace` (a re.sub template)")
     elif "replace" in rule and not rewrite_rule:
         problems.append("`replace` only belongs on a rewrite rule")
+    elif rewrite_rule and not problems:
+        rx = _regex(rule)
+        for g in template_groups(rule["replace"]):
+            if (isinstance(g, int) and g > rx.groups) or (isinstance(g, str) and g not in rx.groupindex):
+                problems.append(f"replace names group {g!r}, which the pattern does not have")
     when = rule.get("when")
     if when is not None:
         if not isinstance(when, dict):
@@ -133,9 +141,8 @@ def validate(rule):
                 problems.append(f"bad test {t!r}: needs input + expect block|pass|rewrite")
             elif t["expect"] == "rewrite" and not isinstance(t.get("output"), str):
                 problems.append(f"bad test {t!r}: expect rewrite needs the exact `output`")
-            elif (t["expect"] == "rewrite") != rewrite_rule and t["expect"] != "pass":
-                problems.append(f"bad test {t!r}: a {rule['action']} rule's tests expect "
-                                f"{'rewrite' if rewrite_rule else 'block'}|pass")
+            elif t["expect"] == "rewrite" and not rewrite_rule:
+                problems.append(f"bad test {t!r}: a {rule['action']} rule's tests expect block|pass")
     return problems
 
 
@@ -189,7 +196,7 @@ def rule_input(rule, tool_name, tool_input):
     field = rule["field"]
     if field == "command":
         cmd = tool_input.get("command")
-        return strip_heredocs(cmd) if isinstance(cmd, str) else None
+        return blank_heredocs(cmd) if isinstance(cmd, str) else None
     val = tool_input.get(field)
     if val is None and field == "content":
         val = tool_input.get("new_string")
@@ -264,13 +271,25 @@ def matches(rule, text):
     return _regex(rule).search(_inspectable(rule, text)) is not None
 
 
+# The template grammar: `\N` and `\g<name>` copy a group, `\\` is one backslash;
+# every other character, backslash included, is literal (not re.sub's escapes).
 _TEMPLATE = re.compile(r"\\(\d+)|\\g<(\w+)>|\\\\")
+
+
+def template_groups(template):
+    """The group numbers/names a template copies."""
+    out = []
+    for t in _TEMPLATE.finditer(template):
+        g = t.group(1) or t.group(2)
+        if g is not None:
+            out.append(int(g) if g.isdigit() else g)
+    return out
 
 
 def _expand(template, m, original):
     """`template` with `\\N` / `\\g<name>` filled from `original` at the match's
     group spans — the match was made on blanked text, the groups come from the
-    real command. `\\\\` is one backslash."""
+    real command."""
     def repl(t):
         if t.group(0) == "\\\\":
             return "\\"
@@ -282,21 +301,60 @@ def _expand(template, m, original):
     return _TEMPLATE.sub(repl, template)
 
 
+def _protected(cmd):
+    """Byte positions of `cmd` the shell treats as text, not command words:
+    data heredoc bodies, every quoted string (a `$(…)` inside double quotes
+    too — a rewrite must not break the quoting around it), comments and
+    escape pairs."""
+    mask = [False] * len(cmd)
+    blanked = blank_heredocs(cmd)
+    for i, (a, b) in enumerate(zip(cmd, blanked)):
+        if a != b:
+            mask[i] = True
+    for m in _QUOTED.finditer(blanked):
+        for i in range(m.start(), m.end()):
+            mask[i] = True
+    return mask
+
+
 def rewrite(rule, value):
-    """`value` with every match of the rule replaced, or None when nothing
-    changes. Data heredoc bodies and (flag q) quoted strings are matched as
-    blanks of the same length, so the substitution lands on the real text and
-    never inside them."""
-    text = blank_heredocs(value) if rule["field"] == "command" else value
+    """`(new_value, unsafe)`: `value` with every safe match replaced (None
+    when nothing changes), and the number of matches that were left alone
+    because the rewrite would have landed inside protected text — those
+    calls block, as a block rule would. Data heredoc bodies and (flag q)
+    quoted strings are matched as blanks of the same length, so the groups
+    copied back come from the real command. A match is safe when no part
+    of its span outside a copied group is protected; a match that lies
+    wholly inside protected text is data and skipped silently when every
+    command in the call is read-only (the `q` rule), else unsafe."""
+    command = rule["field"] == "command"
+    text = blank_heredocs(value) if command else value
     text = _inspectable(rule, text)
-    out, pos = [], 0
+    mask = _protected(value) if command else [False] * len(value)
+    copied = template_groups(rule["replace"])
+    data_ok = command and _quotes_are_data(value)
+    out, pos, unsafe = [], 0, 0
     for m in _regex(rule).finditer(text):
+        span = range(m.start(), m.end())
+        hit = [i for i in span if mask[i]]
+        if hit:
+            if len(hit) == len(span) and len(span):
+                if not data_ok:
+                    unsafe += 1
+                continue
+            kept = set()
+            for g in copied:
+                s, e = m.span(g)
+                kept.update(range(s, e))
+            if any(i not in kept for i in hit):
+                unsafe += 1
+                continue
         out.append(value[pos:m.start()])
         out.append(_expand(rule["replace"], m, value))
         pos = m.end()
     out.append(value[pos:])
     new = "".join(out)
-    return new if new != value else None
+    return (new if new != value else None), unsafe
 
 
 def context(cwd=None):
@@ -395,8 +453,15 @@ def run_tests(rule):
         tool = rule["tool"] if isinstance(rule["tool"], str) else rule["tool"][0]
         text = rule_input(rule, tool, {rule["field"]: t["input"]})
         fired = text is not None and matches(rule, text)
-        if t["expect"] == "rewrite":
-            ok = fired and rewrite(rule, t["input"]) == t.get("output")
+        if rule["action"] == "rewrite" and fired:
+            new, unsafe = rewrite(rule, t["input"])
+            # rewrite: the exact output and nothing unsafe; block: an unsafe
+            # match (the call is refused); pass: every match was data.
+            ok = {"rewrite": new == t.get("output") and not unsafe,
+                  "block": unsafe > 0,
+                  "pass": not unsafe and new is None}[t["expect"]]
+        elif t["expect"] == "rewrite":
+            ok = False
         else:
             ok = fired == (t["expect"] == "block")
         out.append((t, ok))

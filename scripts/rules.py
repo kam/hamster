@@ -98,7 +98,7 @@ def cmd_test(args):
                 if not good:
                     print(f"       expected {t['expect']} for: {t['input']!r}")
                     if t["expect"] == "rewrite":
-                        print(f"       wanted {t.get('output')!r}, got {rewrite(r, t['input'])!r}")
+                        print(f"       wanted {t.get('output')!r}, got {rewrite(r, t['input'])!r} (new, unsafe)")
     return 1 if failed else 0
 
 
@@ -123,7 +123,7 @@ def cmd_add(args):
             if not good:
                 print(f"FAIL expected {t['expect']} for: {t['input']!r}")
                 if t["expect"] == "rewrite":
-                    print(f"     wanted {t.get('output')!r}, got {rewrite(rule, t['input'])!r}")
+                    print(f"     wanted {t.get('output')!r}, got {rewrite(rule, t['input'])!r} (new, unsafe)")
         return 1
     dest_dir = dict(rule_dirs()).get(args.scope)
     if dest_dir is None:
@@ -154,7 +154,13 @@ def cmd_check(args):
     for r, action in hits:
         print(f"{action:<7} {r['id']}: {r['message']}")
         if action == "rewrite":
-            print(f"        → {rewrite(r, args.input)}")
+            new, unsafe = rewrite(r, args.input)
+            if unsafe:
+                print(f"        → blocks: the rewrite would land inside quoted text")
+            elif new is None:
+                print(f"        → unchanged (the match is data)")
+            else:
+                print(f"        → {new}")
     return 0
 
 
