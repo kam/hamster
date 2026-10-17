@@ -327,7 +327,7 @@ def _lexable(cmd):
     if "$'" in cmd:
         return False
     for m in _QUOTED.finditer(blank_heredocs(cmd)):
-        if m.group(0)[0] in "\"`" and _NESTED.search(m.group(0)):
+        if m.group(0)[0] == '"' and _NESTED.search(m.group(0)):
             return False
     return True
 
