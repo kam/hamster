@@ -64,6 +64,14 @@ def test_partly_quoted_delimiter_hides_nothing(env, opener, term):
     assert r.returncode == 2
 
 
+def test_dash_heredoc_ends_at_an_indented_terminator(env):
+    """`<<-` strips leading tabs: `\\tEOF` ends the body, so the next line runs (review r2)."""
+    r = guard("Bash", {"command": "cat <<-EOF\nx\n\tEOF\nrm -rf /\nEOF"})
+    assert r.returncode == 2
+    r = guard("Bash", {"command": "cat > f <<-EOF\n\tnever run rm -rf /\n\tEOF"})
+    assert r.returncode == 0
+
+
 def test_heredoc_to_shell_still_blocks(env):
     r = guard("Bash", {"command": "bash <<'EOF'\nrm -rf /\nEOF"})
     assert r.returncode == 2

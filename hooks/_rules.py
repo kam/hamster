@@ -54,7 +54,10 @@ FIRES = state_dir("rule-fires.json")
 # A partly quoted delimiter (`E\OF`, `"E"OF`) ends at `EOF` to the shell, which
 # `\2` cannot express, as is any word cut short (`E.OF`, `E@OF`): a shell
 # metacharacter or the line end must follow, else nothing matches and the body stays visible.
-_HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1(?=[ \t;&|<>()`]|\n)[^\n]*\n(.*?)\n\2(?=\n|$)", re.S)
+# `<<-` strips leading tabs, so its terminator may be indented.
+_HEREDOC = re.compile(
+    r"<<(?P<dash>-)?\s*(?P<q>['\"]?)(?P<delim>\w+)(?P=q)(?=[ \t;&|<>()`]|\n)[^\n]*\n"
+    r"(?P<body>.*?)\n(?(dash)\t*)(?P=delim)(?=\n|$)", re.S)
 # The interpreter must stand as a word of its own, bare or by path (`bash <<EOF`,
 # `sudo /bin/sh <<EOF`); `cat > deploy.sh <<EOF` is data even though the filename ends in `sh`.
 _SHELL = re.compile(r"(?:^|[\s;&|(/])((?:ba|z|da)?sh|eval|source)(?:\s|$)")
@@ -63,10 +66,10 @@ _SHELL = re.compile(r"(?:^|[\s;&|(/])((?:ba|z|da)?sh|eval|source)(?:\s|$)")
 def strip_heredocs(cmd):
     def repl(m):
         line_start = cmd.rfind("\n", 0, m.start()) + 1
-        tail = cmd[m.end(2) + len(m.group(1)) : m.start(3)]  # after the marker: `<<EOF | sh`
+        tail = cmd[m.end("delim") + len(m.group("q")) : m.start("body")]  # after the marker: `<<EOF | sh`
         if _SHELL.search(cmd[line_start : m.start()]) or _SHELL.search(tail):
             return m.group(0)
-        return m.group(0)[: m.start(3) - m.start()] + "\n" + m.group(2)
+        return m.group(0)[: m.start("body") - m.start()] + "\n" + m.group("delim")
 
     return _HEREDOC.sub(repl, cmd)
 
@@ -76,11 +79,11 @@ def blank_heredocs(cmd):
     so a match position on the result is the same position in `cmd`."""
     def repl(m):
         line_start = cmd.rfind("\n", 0, m.start()) + 1
-        tail = cmd[m.end(2) + len(m.group(1)) : m.start(3)]
+        tail = cmd[m.end("delim") + len(m.group("q")) : m.start("body")]
         if _SHELL.search(cmd[line_start : m.start()]) or _SHELL.search(tail):
             return m.group(0)
-        head = m.group(0)[: m.start(3) - m.start()]
-        return head + " " * (m.end(3) - m.start(3)) + m.group(0)[m.end(3) - m.start() :]
+        head = m.group(0)[: m.start("body") - m.start()]
+        return head + " " * (m.end("body") - m.start("body")) + m.group(0)[m.end("body") - m.start() :]
 
     return _HEREDOC.sub(repl, cmd)
 
