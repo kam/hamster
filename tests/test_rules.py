@@ -84,6 +84,7 @@ def test_here_string_opens_no_heredoc(env, opener):
     "echo \\<<EOF\nrm -rf /\nEOF",               # escaped `<`
     "diff <(cat <<EOF) f\nrm -rf /\nEOF",         # process substitution
     "tee >(cat <<EOF) f\nrm -rf /\nEOF",
+    "rm -rf /\necho " + "$(" * 60000 + " cat <<E\nbody\nE\n",  # deep line: decided, no crash (review r5)
     "echo $((1+(cat <<EOF\n)))\nrm -rf /\nEOF",  # a plain paren inside arithmetic
     "echo $((1<(cat <<EOF\n)))\nrm -rf /\nEOF",
     "echo $(( (cat <<EOF\n)))\nrm -rf /\nEOF",

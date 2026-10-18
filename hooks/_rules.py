@@ -83,11 +83,13 @@ def _scan_line(text, ctx=None, low=None):
     arithmetic. The stack is an immutable linked list `(entry, rest,
     depth)`, None when empty: a line hands it on without a copy, so deep
     nesting over many lines stays linear (review r4). `low`, a list
-    `[start, depth]`, gets the least stack depth seen from offset `start`
-    on, in the same pass."""
+    `[start, None, None]`, gets the least stack depth seen from offset
+    `start` on and the `(quote, stack)` at `start`, in the same pass."""
     state, stack, joined = ctx if ctx else (None, None, False)
     escaped, word_start, i = False, not joined, 0
     while i < len(text):
+        if low is not None and low[2] is None and i >= low[0]:
+            low[1:] = [_depth(stack), (state, stack)]
         ch = text[i]
         at_word_start, word_start = word_start, False
         if escaped:
@@ -137,9 +139,11 @@ def _scan_line(text, ctx=None, low=None):
                 state, stack = stack[0][0], stack[1]; i += len(closer) - 1
             else:
                 word_start = ch in " \t;&|()"
-        if low is not None and i >= low[0]:
+        if low is not None and low[2] is not None:
             low[1] = min(low[1], _depth(stack))
         i += 1
+    if low is not None and low[2] is None:
+        low[1:] = [_depth(stack), (state, stack)]
     joined = escaped and len(text) > 1 and text[-2] not in " \t"
     return (state, stack, joined), None
 
@@ -175,9 +179,13 @@ def _body_follows(line, end, ctx):
     substitution left open after the opener moves the body later. Either way
     the opener is dropped, which shows more lines, never fewer. `end` is the
     offset just past the opener's delimiter."""
-    at = _scan_line(line[:end], ctx)[0][:2]
-    low = [end, _depth(at[1])]
-    return _scan_line(line, ctx, low)[0][:2] == at and low[1] == _depth(at[1])
+    low = [end, None, None]
+    (state, stack, _), _ = _scan_line(line, ctx, low)
+    if low[2] is None:  # a comment before `end`: `_opener_hidden` has it
+        return False
+    # identity, not ==: equal stacks built apart compare node by node, one
+    # C stack frame each, and a deep line overflowed it (review r5)
+    return state == low[2][0] and stack is low[2][1] and low[1] == _depth(stack)
 
 
 _HEREDOC_BUDGET = 1_000_000
