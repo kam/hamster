@@ -63,7 +63,7 @@ _HEREDOC = re.compile(
 _SHELL = re.compile(r"(?:^|[\s;&|(/])((?:ba|z|da)?sh|eval|source)(?:\s|$)")
 
 
-# _scan_line, _opener_hidden and _body_follows are dev-lead hooks/git-guard.py's, verbatim:
+# _scan_line, _opener_hidden, _ctx_top and _body_follows are dev-lead hooks/git-guard.py's, verbatim:
 # keep the two in step.
 def _scan_line(text, ctx=None, low=None):
     """Walk one line of shell as the shell lexes it: `(ctx, comment)`. `ctx`
@@ -77,7 +77,9 @@ def _scan_line(text, ctx=None, low=None):
     and a `'` inside `"$(…)"` closes nothing it did not open. The third
     element, `joined`, says the line ended `x\\`: the shell glues the next
     line onto that word, so its column 0 is not a word start (`a\\` then
-    `#"` is the word `a#"`, not a comment). `low`, a list `[start, depth]`,
+    `#"` is the word `a#"`, not a comment). A plain paren's entry carries a
+    third element, so `_ctx_top` can look past it to the context it sits
+    in: `$((1+(cat <<EOF` is still arithmetic. `low`, a list `[start, depth]`,
     gets the least stack depth seen from offset `start` on, in the same pass."""
     state, stack, joined = ctx if ctx else (None, (), False)
     stack, escaped, word_start, i = list(stack), False, not joined, 0
@@ -119,16 +121,19 @@ def _scan_line(text, ctx=None, low=None):
             elif ch == "`" and closer != "`":
                 stack.append((None, "`"))
             elif ch in "<>" and text.startswith("(", i + 1):
-                stack.append((None, ")")); i += 1  # `<(…)`, `>(…)`: a substitution too
+                # `<(…)`, `>(…)`: a substitution, except in arithmetic (`1<(2)`)
+                top = _ctx_top(stack)
+                stack.append((None, ")", "(") if top and top[1] in ("))", "]", "}") else (None, ")"))
+                i += 1
             elif ch == "(" and stack:
-                stack.append((None, ")"))  # a plain paren inside a substitution
+                stack.append((None, ")", "("))  # a plain paren inside a substitution
             elif closer == "))" and ch == ")" and not text.startswith("))", i):
                 stack[-1] = (stack[-1][0], ")")  # `$((echo a) | cat)`: bash fell back to `$( (…`
             elif closer and text.startswith(closer, i):
                 state = stack.pop()[0]; i += len(closer) - 1
             else:
                 word_start = ch in " \t;&|()"
-        if low and i >= low[0]:
+        if low is not None and i >= low[0]:
             low[1] = min(low[1], len(stack))
         i += 1
     joined = escaped and len(text) > 1 and text[-2] not in " \t"
@@ -140,7 +145,13 @@ def _opener_hidden(prefix, ctx=None):
     text to the shell, not a heredoc opener (review of 0.11.0, 2026-10-01:
     the lines after such an opener run, and were blanked from every gate)."""
     (quote, stack, _), comment = _scan_line(prefix, ctx)
-    return comment is not None or quote is not None or bool(stack and stack[-1][1] in ("))", "]", "}"))
+    top = _ctx_top(stack)
+    return comment is not None or quote is not None or bool(top and top[1] in ("))", "]", "}"))
+
+
+def _ctx_top(stack):
+    """The innermost `_scan_line` context that is not a plain paren."""
+    return next((e for e in reversed(stack) if len(e) == 2), None)
 
 
 def _body_follows(line, end, ctx):

@@ -84,6 +84,11 @@ def test_here_string_opens_no_heredoc(env, opener):
     "echo \\<<EOF\nrm -rf /\nEOF",               # escaped `<`
     "diff <(cat <<EOF) f\nrm -rf /\nEOF",         # process substitution
     "tee >(cat <<EOF) f\nrm -rf /\nEOF",
+    "echo $((1+(cat <<EOF\n)))\nrm -rf /\nEOF",  # a plain paren inside arithmetic
+    "echo $((1<(cat <<EOF\n)))\nrm -rf /\nEOF",
+    "echo $(( (cat <<EOF\n)))\nrm -rf /\nEOF",
+    "echo $[1+(cat <<EOF\n)]\nrm -rf /\nEOF",
+    "echo ${x:-(cat <<EOF\n)}\nrm -rf /\nEOF",
     "x=$(cat <<EOF) " * 2000 + "\nrm -rf /\nEOF",  # past the budget: nothing stripped
 ])
 def test_opener_the_shell_does_not_see_hides_nothing(env, cmd):
@@ -97,6 +102,8 @@ def test_many_openers_finish_inside_the_hook_timeout():
     t = time.monotonic()
     _rules.blank_heredocs("x=$(cat <<EOF) " * 2000 + "\nrm -rf /\nEOF")
     _rules.blank_heredocs("cat > f <<EOF " + "(" * 4000 + ")" * 4000 + "\nEOF\nrm -rf /")
+    # just under the budget, so every opener is checked
+    _rules.blank_heredocs("cat " + "<<E " * 400 + "\n" + "E\n" * 400 + "rm -rf /")
     assert time.monotonic() - t < 2
 
 
