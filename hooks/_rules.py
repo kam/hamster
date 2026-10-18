@@ -63,7 +63,7 @@ _HEREDOC = re.compile(
 _SHELL = re.compile(r"(?:^|[\s;&|(/])((?:ba|z|da)?sh|eval|source)(?:\s|$)")
 
 
-# _scan_line, _opener_hidden, _ctx_top and _body_follows are dev-lead hooks/git-guard.py's, verbatim:
+# _scan_line, _push, _depth, _opener_hidden, _ctx_top and _body_follows are dev-lead hooks/git-guard.py's, verbatim:
 # keep the two in step.
 def _scan_line(text, ctx=None, low=None):
     """Walk one line of shell as the shell lexes it: `(ctx, comment)`. `ctx`
@@ -78,11 +78,15 @@ def _scan_line(text, ctx=None, low=None):
     element, `joined`, says the line ended `x\\`: the shell glues the next
     line onto that word, so its column 0 is not a word start (`a\\` then
     `#"` is the word `a#"`, not a comment). A plain paren's entry carries,
-    third, the real context it sits in, so `_ctx_top` sees past it in one
-    step: `$((1+(cat <<EOF` is still arithmetic. `low`, a list `[start, depth]`,
-    gets the least stack depth seen from offset `start` on, in the same pass."""
-    state, stack, joined = ctx if ctx else (None, (), False)
-    stack, escaped, word_start, i = list(stack), False, not joined, 0
+    third, the real context it sits in (never another plain paren), so
+    `_ctx_top` sees past it in one step: `$((1+(cat <<EOF` is still
+    arithmetic. The stack is an immutable linked list `(entry, rest,
+    depth)`, None when empty: a line hands it on without a copy, so deep
+    nesting over many lines stays linear (review r4). `low`, a list
+    `[start, depth]`, gets the least stack depth seen from offset `start`
+    on, in the same pass."""
+    state, stack, joined = ctx if ctx else (None, None, False)
+    escaped, word_start, i = False, not joined, 0
     while i < len(text):
         ch = text[i]
         at_word_start, word_start = word_start, False
@@ -97,47 +101,55 @@ def _scan_line(text, ctx=None, low=None):
             if ch == '"':
                 state = None
             elif text.startswith("$((", i):
-                stack.append(('"', "))")); state = None; i += 2
+                stack = _push(stack, ('"', "))")); state = None; i += 2
             elif text.startswith("$(", i):
-                stack.append(('"', ")")); state = None; i += 1
+                stack = _push(stack, ('"', ")")); state = None; i += 1
             elif text.startswith("${", i) or text.startswith("$[", i):
-                stack.append(('"', "}" if text[i + 1] == "{" else "]")); state = None; i += 1
+                stack = _push(stack, ('"', "}" if text[i + 1] == "{" else "]")); state = None; i += 1
             elif ch == "`":
-                stack.append(('"', "`")); state = None
+                stack = _push(stack, ('"', "`")); state = None
         else:
-            closer = stack[-1][1] if stack else None
+            closer = stack[0][1] if stack else None
             if text.startswith("$'", i):
                 state = "$'"; i += 1
             elif ch in "'\"":
                 state = ch
             elif ch == "#" and at_word_start:
-                return (state, tuple(stack), False), i
+                return (state, stack, False), i
             elif text.startswith("$((", i) or (at_word_start and text.startswith("((", i)):
-                stack.append((None, "))")); i += 1 + (ch == "$")
+                stack = _push(stack, (None, "))")); i += 1 + (ch == "$")
             elif text.startswith("$(", i):
-                stack.append((None, ")")); i += 1
+                stack = _push(stack, (None, ")")); i += 1
             elif text.startswith("${", i) or text.startswith("$[", i):
-                stack.append((None, "}" if text[i + 1] == "{" else "]")); i += 1
+                stack = _push(stack, (None, "}" if text[i + 1] == "{" else "]")); i += 1
             elif ch == "`" and closer != "`":
-                stack.append((None, "`"))
+                stack = _push(stack, (None, "`"))
             elif ch in "<>" and text.startswith("(", i + 1):
                 # `<(…)`, `>(…)`: a substitution, except in arithmetic (`1<(2)`)
                 top = _ctx_top(stack)
-                stack.append((None, ")", top) if top and top[1] in ("))", "]", "}") else (None, ")"))
+                stack = _push(stack, (None, ")", top) if top and top[1] in ("))", "]", "}") else (None, ")"))
                 i += 1
             elif ch == "(" and stack:
-                stack.append((None, ")", _ctx_top(stack)))  # a plain paren inside a substitution
+                stack = _push(stack, (None, ")", _ctx_top(stack)))  # a plain paren inside a substitution
             elif closer == "))" and ch == ")" and not text.startswith("))", i):
-                stack[-1] = (stack[-1][0], ")")  # `$((echo a) | cat)`: bash fell back to `$( (…`
+                stack = ((stack[0][0], ")"),) + stack[1:]  # `$((echo a) | cat)`: bash fell back to `$( (…`
             elif closer and text.startswith(closer, i):
-                state = stack.pop()[0]; i += len(closer) - 1
+                state, stack = stack[0][0], stack[1]; i += len(closer) - 1
             else:
                 word_start = ch in " \t;&|()"
         if low is not None and i >= low[0]:
-            low[1] = min(low[1], len(stack))
+            low[1] = min(low[1], _depth(stack))
         i += 1
     joined = escaped and len(text) > 1 and text[-2] not in " \t"
-    return (state, tuple(stack), joined), None
+    return (state, stack, joined), None
+
+
+def _push(stack, entry):
+    return (entry, stack, _depth(stack) + 1)
+
+
+def _depth(stack):
+    return stack[2] if stack else 0
 
 
 def _opener_hidden(prefix, ctx=None):
@@ -151,7 +163,7 @@ def _opener_hidden(prefix, ctx=None):
 
 def _ctx_top(stack):
     """The innermost `_scan_line` context that is not a plain paren."""
-    top = stack[-1] if stack else None
+    top = stack[0] if stack else None
     return top if top is None or len(top) == 2 else top[2]
 
 
@@ -164,8 +176,8 @@ def _body_follows(line, end, ctx):
     the opener is dropped, which shows more lines, never fewer. `end` is the
     offset just past the opener's delimiter."""
     at = _scan_line(line[:end], ctx)[0][:2]
-    low = [end, len(at[1])]
-    return _scan_line(line, ctx, low)[0][:2] == at and low[1] == len(at[1])
+    low = [end, _depth(at[1])]
+    return _scan_line(line, ctx, low)[0][:2] == at and low[1] == _depth(at[1])
 
 
 _HEREDOC_BUDGET = 1_000_000
