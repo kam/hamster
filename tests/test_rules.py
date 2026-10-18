@@ -65,6 +65,13 @@ def test_partly_quoted_delimiter_hides_nothing(env, opener, term):
     assert r.returncode == 2
 
 
+@pytest.mark.parametrize("opener", ["<<<'O'", "<<<O"])
+def test_here_string_opens_no_heredoc(env, opener):
+    """`<<<` feeds one word; the next line runs (review r4)."""
+    r = guard("Bash", {"command": f"cat {opener}\nx\nO\nrm -rf /\nE"})
+    assert r.returncode == 2
+
+
 def test_dash_heredoc_ends_at_an_indented_terminator(env):
     """`<<-` strips leading tabs: `\\tEOF` ends the body, so the next line runs (review r2)."""
     r = guard("Bash", {"command": "cat <<-EOF\nx\n\tEOF\nrm -rf /\nEOF"})
