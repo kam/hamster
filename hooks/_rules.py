@@ -56,7 +56,7 @@ FIRES = state_dir("rule-fires.json")
 # metacharacter or the line end must follow, else nothing matches and the body stays visible.
 # `<<-` strips leading tabs, so its terminator may be indented.
 _HEREDOC = re.compile(
-    r"<<(?P<dash>-)?\s*(?P<q>['\"]?)(?P<delim>\w+)(?P=q)(?=[ \t;&|<>()`]|\n)[^\n]*\n"
+    r"<<(?P<dash>-)?\s*(?P<q>['\"]?)(?P<delim>\w+)(?P=q)(?=[ \t;&|<>()]|\n)[^\n]*\n"
     r"(?P<body>.*?)\n(?(dash)\t*)(?P=delim)(?=\n|$)", re.S)
 # The interpreter must stand as a word of its own, bare or by path (`bash <<EOF`,
 # `sudo /bin/sh <<EOF`); `cat > deploy.sh <<EOF` is data even though the filename ends in `sh`.

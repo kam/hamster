@@ -56,7 +56,8 @@ def test_heredoc_body_is_data(env):
 
 @pytest.mark.parametrize("opener,term", [
     ("<<\"E\"OF", "EOF"), ("<<E\\OF", "EOF"), ("<<'E'OF", "EOF"), ("<<EO\"F\"", "EOF"),
-    ("<<E.OF", "E.OF"), ("<<E-OF", "E-OF"), ("<<E@OF", "E@OF"), ("<<E+OF", "E+OF")])
+    ("<<E.OF", "E.OF"), ("<<E-OF", "E-OF"), ("<<E@OF", "E@OF"), ("<<E+OF", "E+OF"),
+    ("<<EOF`x`", "EOF`x`"), ("<<'EOF'`x`", "EOF`x`"), ("<<-EOF`x`", "EOF`x`")])
 def test_partly_quoted_delimiter_hides_nothing(env, opener, term):
     """The shell ends the body at `term`; read as `E`, the strip ran on to a
     later `E` line and hid the command between (dev-lead review r3, 2026-10-18)."""
