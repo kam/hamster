@@ -98,11 +98,13 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
-		if (!enabledIn(ctx.cwd)) return;
 		// SessionStart hooks: stdout is context (Claude Code appends it to the
 		// conversation); here it rides along in the system prompt, once per run.
+		// The plugin-root note goes in everywhere: pi lists this package's
+		// prompts whether or not the plugin is enabled here, and they name
+		// ${CLAUDE_PLUGIN_ROOT} literally (tools/pi-package.py).
 		const injected: string[] = [];
-		if (!sessionStarted) {
+		if (!sessionStarted && enabledIn(ctx.cwd)) {
 			sessionStarted = true;
 			for (const entry of hooks.SessionStart ?? []) {
 				for (const hook of entry.hooks) {

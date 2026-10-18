@@ -82,10 +82,22 @@ def test_here_string_opens_no_heredoc(env, opener):
     "x=`cat <<EOF`\nrm -rf /\nEOF",
     "cat <<F&`&\\\nx\nF&`&\\\nrm -rf /\nF",       # backtick opened after the opener
     "echo \\<<EOF\nrm -rf /\nEOF",               # escaped `<`
+    "diff <(cat <<EOF) f\nrm -rf /\nEOF",         # process substitution
+    "tee >(cat <<EOF) f\nrm -rf /\nEOF",
+    "x=$(cat <<EOF) " * 2000 + "\nrm -rf /\nEOF",  # past the budget: nothing stripped
 ])
 def test_opener_the_shell_does_not_see_hides_nothing(env, cmd):
     """dev-lead review 2026-10-18: these `<<` open no heredoc, so the next line runs."""
     assert guard("Bash", {"command": cmd}).returncode == 2
+
+
+def test_many_openers_finish_inside_the_hook_timeout():
+    import time
+    import _rules
+    t = time.monotonic()
+    _rules.blank_heredocs("x=$(cat <<EOF) " * 2000 + "\nrm -rf /\nEOF")
+    _rules.blank_heredocs("cat > f <<EOF " + "(" * 4000 + ")" * 4000 + "\nEOF\nrm -rf /")
+    assert time.monotonic() - t < 2
 
 
 def test_heredoc_after_a_quoted_apostrophe_still_strips(env):

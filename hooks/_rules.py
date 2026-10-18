@@ -63,9 +63,9 @@ _HEREDOC = re.compile(
 _SHELL = re.compile(r"(?:^|[\s;&|(/])((?:ba|z|da)?sh|eval|source)(?:\s|$)")
 
 
-# _scan_line and _opener_hidden are dev-lead hooks/git-guard.py's, verbatim:
+# _scan_line, _opener_hidden and _body_follows are dev-lead hooks/git-guard.py's, verbatim:
 # keep the two in step.
-def _scan_line(text, ctx=None):
+def _scan_line(text, ctx=None, low=None):
     """Walk one line of shell as the shell lexes it: `(ctx, comment)`. `ctx`
     is `(quote, stack)`: the quote open at the end ('\\'', '"', "$'" or
     None) and the open `$(`, backtick, `$((` and nested `(` contexts, each
@@ -77,7 +77,8 @@ def _scan_line(text, ctx=None):
     and a `'` inside `"$(…)"` closes nothing it did not open. The third
     element, `joined`, says the line ended `x\\`: the shell glues the next
     line onto that word, so its column 0 is not a word start (`a\\` then
-    `#"` is the word `a#"`, not a comment)."""
+    `#"` is the word `a#"`, not a comment). `low`, a list `[start, depth]`,
+    gets the least stack depth seen from offset `start` on, in the same pass."""
     state, stack, joined = ctx if ctx else (None, (), False)
     stack, escaped, word_start, i = list(stack), False, not joined, 0
     while i < len(text):
@@ -117,6 +118,8 @@ def _scan_line(text, ctx=None):
                 stack.append((None, "}" if text[i + 1] == "{" else "]")); i += 1
             elif ch == "`" and closer != "`":
                 stack.append((None, "`"))
+            elif ch in "<>" and text.startswith("(", i + 1):
+                stack.append((None, ")")); i += 1  # `<(…)`, `>(…)`: a substitution too
             elif ch == "(" and stack:
                 stack.append((None, ")"))  # a plain paren inside a substitution
             elif closer == "))" and ch == ")" and not text.startswith("))", i):
@@ -125,6 +128,8 @@ def _scan_line(text, ctx=None):
                 state = stack.pop()[0]; i += len(closer) - 1
             else:
                 word_start = ch in " \t;&|()"
+        if low and i >= low[0]:
+            low[1] = min(low[1], len(stack))
         i += 1
     joined = escaped and len(text) > 1 and text[-2] not in " \t"
     return (state, tuple(stack), joined), None
@@ -139,23 +144,31 @@ def _opener_hidden(prefix, ctx=None):
 
 
 def _body_follows(line, end, ctx):
-    """True when the body of an opener ending at `line[end]` starts on the
-    next line: the line ends in the opener's own context and nothing closed
-    that context in between. `x="$(cat <<EOF)"` closes the substitution first,
-    so the heredoc is empty and the next lines run; a quote or substitution
-    left open after the opener moves the body later. Same as git-guard.py."""
+    """True when the body starts on the next line: the line ends in the
+    opener's own context and nothing closed that context in between. In
+    `x="$(cat <<EOF)"` the substitution closes first, so the heredoc is empty
+    and the shell runs the next lines (review r4, 2026-10-18); a quote or
+    substitution left open after the opener moves the body later. Either way
+    the opener is dropped, which shows more lines, never fewer. `end` is the
+    offset just past the opener's delimiter."""
     at = _scan_line(line[:end], ctx)[0][:2]
-    for k in range(end, len(line)):
-        if line[k] in ")`]}" and len(_scan_line(line[:k + 1], ctx)[0][1]) < len(at[1]):
-            return False
-    return _scan_line(line, ctx)[0][:2] == at
+    low = [end, len(at[1])]
+    return _scan_line(line, ctx, low)[0][:2] == at and low[1] == len(at[1])
+
+
+_HEREDOC_BUDGET = 1_000_000
 
 
 def _sub_heredocs(repl, cmd):
     """`_HEREDOC.sub(repl, cmd)` over the heredocs the shell really opens. Shell
     lines are lexed in order, so a `<<` that is comment, quoted, arithmetic or
     escaped text, or whose substitution closes on its own line, opens nothing
-    and the lines after it stay visible. Body lines are never lexed."""
+    and the lines after it stay visible. Body lines are never lexed. Each
+    opener rescans its line, so past `_HEREDOC_BUDGET` (openers × length)
+    nothing is stripped: a guard that runs out its hook timeout lets the
+    call through. Same budget as git-guard.py."""
+    if cmd.count("<<") * len(cmd) > _HEREDOC_BUDGET:
+        return cmd
     out, done, pos, line_start, ctx = [], 0, 0, 0, None
     while m := _HEREDOC.search(cmd, pos):
         ls = cmd.rfind("\n", 0, m.start()) + 1
