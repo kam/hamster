@@ -178,7 +178,9 @@ def _body_follows(line, end, ctx):
     and the shell runs the next lines (review r4, 2026-10-18); a quote or
     substitution left open after the opener moves the body later. Either way
     the opener is dropped, which shows more lines, never fewer. `end` is the
-    offset just past the opener's delimiter."""
+    offset just past the opener's delimiter, which never ends in `$`, `(`,
+    `<`, `>` or `)`: no multi-char token straddles it, so the context
+    recorded there is exact. Widen the delimiter regex and that breaks."""
     low = [end, None, None]
     (state, stack, _), _ = _scan_line(line, ctx, low)
     if low[2] is None:  # a comment before `end`: `_opener_hidden` has it
