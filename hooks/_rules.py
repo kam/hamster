@@ -63,6 +63,116 @@ _HEREDOC = re.compile(
 _SHELL = re.compile(r"(?:^|[\s;&|(/])((?:ba|z|da)?sh|eval|source)(?:\s|$)")
 
 
+# _scan_line and _opener_hidden are dev-lead hooks/git-guard.py's, verbatim:
+# keep the two in step.
+def _scan_line(text, ctx=None):
+    """Walk one line of shell as the shell lexes it: `(ctx, comment)`. `ctx`
+    is `(quote, stack)`: the quote open at the end ('\\'', '"', "$'" or
+    None) and the open `$(`, backtick, `$((` and nested `(` contexts, each
+    remembering the quote it interrupted and its closer. Carried line to
+    line, so `)"` closes what an earlier `"$(` opened. `comment` is the
+    offset of an unquoted word-start `#` (scanning stops there; `a#b` and
+    `${#x}` are not comments). `$(` and a backtick open a fresh unquoted
+    context even inside double quotes, so `"$(cat <<'EOF'` is a real opener
+    and a `'` inside `"$(…)"` closes nothing it did not open. The third
+    element, `joined`, says the line ended `x\\`: the shell glues the next
+    line onto that word, so its column 0 is not a word start (`a\\` then
+    `#"` is the word `a#"`, not a comment)."""
+    state, stack, joined = ctx if ctx else (None, (), False)
+    stack, escaped, word_start, i = list(stack), False, not joined, 0
+    while i < len(text):
+        ch = text[i]
+        at_word_start, word_start = word_start, False
+        if escaped:
+            escaped = False
+        elif ch == "\\" and state != "'":
+            escaped = True
+        elif state in ("'", "$'"):
+            if ch == "'":
+                state = None
+        elif state == '"':
+            if ch == '"':
+                state = None
+            elif text.startswith("$((", i):
+                stack.append(('"', "))")); state = None; i += 2
+            elif text.startswith("$(", i):
+                stack.append(('"', ")")); state = None; i += 1
+            elif text.startswith("${", i) or text.startswith("$[", i):
+                stack.append(('"', "}" if text[i + 1] == "{" else "]")); state = None; i += 1
+            elif ch == "`":
+                stack.append(('"', "`")); state = None
+        else:
+            closer = stack[-1][1] if stack else None
+            if text.startswith("$'", i):
+                state = "$'"; i += 1
+            elif ch in "'\"":
+                state = ch
+            elif ch == "#" and at_word_start:
+                return (state, tuple(stack), False), i
+            elif text.startswith("$((", i) or (at_word_start and text.startswith("((", i)):
+                stack.append((None, "))")); i += 1 + (ch == "$")
+            elif text.startswith("$(", i):
+                stack.append((None, ")")); i += 1
+            elif text.startswith("${", i) or text.startswith("$[", i):
+                stack.append((None, "}" if text[i + 1] == "{" else "]")); i += 1
+            elif ch == "`" and closer != "`":
+                stack.append((None, "`"))
+            elif ch == "(" and stack:
+                stack.append((None, ")"))  # a plain paren inside a substitution
+            elif closer == "))" and ch == ")" and not text.startswith("))", i):
+                stack[-1] = (stack[-1][0], ")")  # `$((echo a) | cat)`: bash fell back to `$( (…`
+            elif closer and text.startswith(closer, i):
+                state = stack.pop()[0]; i += len(closer) - 1
+            else:
+                word_start = ch in " \t;&|()"
+        i += 1
+    joined = escaped and len(text) > 1 and text[-2] not in " \t"
+    return (state, tuple(stack), joined), None
+
+
+def _opener_hidden(prefix, ctx=None):
+    """True when a `<<` right after `prefix` is comment, quoted or arithmetic
+    text to the shell, not a heredoc opener (review of 0.11.0, 2026-10-01:
+    the lines after such an opener run, and were blanked from every gate)."""
+    (quote, stack, _), comment = _scan_line(prefix, ctx)
+    return comment is not None or quote is not None or bool(stack and stack[-1][1] in ("))", "]", "}"))
+
+
+def _body_follows(line, end, ctx):
+    """True when the body of an opener ending at `line[end]` starts on the
+    next line: the line ends in the opener's own context and nothing closed
+    that context in between. `x="$(cat <<EOF)"` closes the substitution first,
+    so the heredoc is empty and the next lines run; a quote or substitution
+    left open after the opener moves the body later. Same as git-guard.py."""
+    at = _scan_line(line[:end], ctx)[0][:2]
+    for k in range(end, len(line)):
+        if line[k] in ")`]}" and len(_scan_line(line[:k + 1], ctx)[0][1]) < len(at[1]):
+            return False
+    return _scan_line(line, ctx)[0][:2] == at
+
+
+def _sub_heredocs(repl, cmd):
+    """`_HEREDOC.sub(repl, cmd)` over the heredocs the shell really opens. Shell
+    lines are lexed in order, so a `<<` that is comment, quoted, arithmetic or
+    escaped text, or whose substitution closes on its own line, opens nothing
+    and the lines after it stay visible. Body lines are never lexed."""
+    out, done, pos, line_start, ctx = [], 0, 0, 0, None
+    while m := _HEREDOC.search(cmd, pos):
+        ls = cmd.rfind("\n", 0, m.start()) + 1
+        for line in cmd[line_start:ls].split("\n")[:-1]:
+            ctx = _scan_line(line, ctx)[0]
+        line_start = ls
+        line, prefix = cmd[ls:m.start("body") - 1], cmd[ls:m.start()]
+        if (re.search(r"(?<!\\)(?:\\\\)*\\$", prefix) or _opener_hidden(prefix, ctx)
+                or not _body_follows(line, m.end("delim") + len(m.group("q")) - ls, ctx)):
+            pos = m.start() + 2
+            continue
+        out += [cmd[done:m.start()], repl(m)]
+        ctx = _scan_line(line, ctx)[0]
+        done = line_start = pos = m.end()
+    return "".join(out) + cmd[done:]
+
+
 def strip_heredocs(cmd):
     def repl(m):
         line_start = cmd.rfind("\n", 0, m.start()) + 1
@@ -71,7 +181,7 @@ def strip_heredocs(cmd):
             return m.group(0)
         return m.group(0)[: m.start("body") - m.start()] + "\n" + m.group("delim")
 
-    return _HEREDOC.sub(repl, cmd)
+    return _sub_heredocs(repl, cmd)
 
 
 def blank_heredocs(cmd):
@@ -85,7 +195,7 @@ def blank_heredocs(cmd):
         head = m.group(0)[: m.start("body") - m.start()]
         return head + " " * (m.end("body") - m.start("body")) + m.group(0)[m.end("body") - m.start() :]
 
-    return _HEREDOC.sub(repl, cmd)
+    return _sub_heredocs(repl, cmd)
 
 
 def plugin_root():
