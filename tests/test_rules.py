@@ -54,11 +54,13 @@ def test_heredoc_body_is_data(env):
     assert r.returncode == 0
 
 
-@pytest.mark.parametrize("opener", ["<<\"E\"OF", "<<E\\OF", "<<'E'OF", "<<EO\"F\""])
-def test_partly_quoted_delimiter_hides_nothing(env, opener):
-    """The shell's terminator is `EOF`; read as `E`, the strip ran on to a
+@pytest.mark.parametrize("opener,term", [
+    ("<<\"E\"OF", "EOF"), ("<<E\\OF", "EOF"), ("<<'E'OF", "EOF"), ("<<EO\"F\"", "EOF"),
+    ("<<E.OF", "E.OF"), ("<<E-OF", "E-OF"), ("<<E@OF", "E@OF"), ("<<E+OF", "E+OF")])
+def test_partly_quoted_delimiter_hides_nothing(env, opener, term):
+    """The shell ends the body at `term`; read as `E`, the strip ran on to a
     later `E` line and hid the command between (dev-lead review r3, 2026-10-18)."""
-    r = guard("Bash", {"command": f"cat {opener}\nx\nEOF\nrm -rf /\nE"})
+    r = guard("Bash", {"command": f"cat {opener}\nx\n{term}\nrm -rf /\nE"})
     assert r.returncode == 2
 
 

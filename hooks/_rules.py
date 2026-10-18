@@ -52,8 +52,9 @@ FIRES = state_dir("rule-fires.json")
 # Heredoc bodies that are data (cat > f <<EOF) must not trip a pattern; bodies
 # fed to a shell interpreter execute and are kept. Same logic as bash-guard.py.
 # A partly quoted delimiter (`E\OF`, `"E"OF`) ends at `EOF` to the shell, which
-# `\2` cannot express: it matches nothing, so its body stays visible.
-_HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1(?![\w'\"\\])[^\n]*\n(.*?)\n\2(?=\n|$)", re.S)
+# `\2` cannot express, as is any word cut short (`E.OF`, `E@OF`): a shell
+# metacharacter or the line end must follow, else nothing matches and the body stays visible.
+_HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1(?=[ \t;&|<>()`]|\n)[^\n]*\n(.*?)\n\2(?=\n|$)", re.S)
 # The interpreter must stand as a word of its own, bare or by path (`bash <<EOF`,
 # `sudo /bin/sh <<EOF`); `cat > deploy.sh <<EOF` is data even though the filename ends in `sh`.
 _SHELL = re.compile(r"(?:^|[\s;&|(/])((?:ba|z|da)?sh|eval|source)(?:\s|$)")

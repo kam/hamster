@@ -1,8 +1,8 @@
 {
   "name": "hamster",
-  "version": "0.6.1",
+  "version": "0.8.1",
   "private": true,
-  "description": "The wheel: capture failures, retro, handoff, promote lessons to tested hook rules, prune what stops firing",
+  "description": "The wheel: a self-learning loop for Claude Code \u2014 capture tool failures, run a one-step retro, keep a handoff across compaction, keep a decision log (pasted client emails captured as sources), and promote lessons into deterministic hook rules (block, warn or rewrite-in-place) with keep-tests that are pruned when they stop firing. Navigator-aware, auto-memory fallback.",
   "keywords": [
     "pi-package"
   ],
@@ -11,10 +11,11 @@
       "./pi/extensions"
     ],
     "skills": [
-      "./skills"
+      "./skills",
+      "!./skills/*-workspace/**"
     ],
     "prompts": [
-      "./commands"
+      "./pi/prompts"
     ]
   },
   "peerDependencies": {
