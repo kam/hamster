@@ -54,6 +54,32 @@ def test_heredoc_body_is_data(env):
     assert r.returncode == 0
 
 
+@pytest.mark.parametrize("opener,term", [
+    ("<<\"E\"OF", "EOF"), ("<<E\\OF", "EOF"), ("<<'E'OF", "EOF"), ("<<EO\"F\"", "EOF"),
+    ("<<E.OF", "E.OF"), ("<<E-OF", "E-OF"), ("<<E@OF", "E@OF"), ("<<E+OF", "E+OF"),
+    ("<<EOF`x`", "EOF`x`"), ("<<'EOF'`x`", "EOF`x`"), ("<<-EOF`x`", "EOF`x`")])
+def test_partly_quoted_delimiter_hides_nothing(env, opener, term):
+    """The shell ends the body at `term`; read as `E`, the strip ran on to a
+    later `E` line and hid the command between (dev-lead review r3, 2026-10-18)."""
+    r = guard("Bash", {"command": f"cat {opener}\nx\n{term}\nrm -rf /\nE"})
+    assert r.returncode == 2
+
+
+@pytest.mark.parametrize("opener", ["<<<'O'", "<<<O"])
+def test_here_string_opens_no_heredoc(env, opener):
+    """`<<<` feeds one word; the next line runs (review r4)."""
+    r = guard("Bash", {"command": f"cat {opener}\nx\nO\nrm -rf /\nE"})
+    assert r.returncode == 2
+
+
+def test_dash_heredoc_ends_at_an_indented_terminator(env):
+    """`<<-` strips leading tabs: `\\tEOF` ends the body, so the next line runs (review r2)."""
+    r = guard("Bash", {"command": "cat <<-EOF\nx\n\tEOF\nrm -rf /\nEOF"})
+    assert r.returncode == 2
+    r = guard("Bash", {"command": "cat > f <<-EOF\n\tnever run rm -rf /\n\tEOF"})
+    assert r.returncode == 0
+
+
 def test_heredoc_to_shell_still_blocks(env):
     r = guard("Bash", {"command": "bash <<'EOF'\nrm -rf /\nEOF"})
     assert r.returncode == 2
