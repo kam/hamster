@@ -85,9 +85,11 @@ A rewrite is emitted as PreToolUse `updatedInput`; Claude sees the rule's messag
 
 `python3 scripts/rules.py add rule.json` validates, runs the tests, and refuses on red. `check Bash "<cmd>"` is a dry run. Heredoc bodies that are data never trip a pattern; bodies piped to a shell do.
 
-## Navigator
+## Navigator (optional)
 
-When the [`navigator`](https://github.com/kam/navigator) CLI is on `PATH`, hamster reads and writes cross-project lessons as `solutions` nodes and session records as `sessions` nodes: the retro lists matching solutions as "already recorded", `/handoff done` files a session node, `/hamster:promote` back-links the node with `promoted_to`, and session start shows this repo's earlier lessons. Without it everything falls back to Claude Code auto-memory. Nothing writes the vault markdown directly.
+You do not need Navigator. Navigator is the author's markdown store for tasks, specs and lessons, and it is not yet public. Every Navigator step checks for the `navigator` CLI on `PATH` and is skipped when it is missing: lessons go to Claude Code auto-memory, `/hamster:standup` reports from the handoff and git log, and `/handoff done` skips the session record.
+
+When the `navigator` CLI is on `PATH`, hamster reads and writes cross-project lessons as `solutions` nodes and session records as `sessions` nodes: the retro lists matching solutions as "already recorded", `/handoff done` files a session node, `/hamster:promote` back-links the node with `promoted_to`, and session start shows this repo's earlier lessons. Without it everything falls back to Claude Code auto-memory. Nothing writes the vault markdown directly.
 
 `/hamster:standup` reads the repo's `task` nodes to orient a session and writes none: hamster owns session state and lessons, not work state. Claiming a task belongs to the workflow that gates the work (dev-lead's `/next-task` in a code repo); elsewhere the stand-up prints the one `navigator update` line and leaves it to you.
 
@@ -120,7 +122,7 @@ git clone https://github.com/kam/hamster.git && cd hamster
 ./install.sh            # symlink; --copy to copy; --uninstall to remove
 ```
 
-Requires `python3` and `git`. Restart Claude Code. The installer copies commands and skills with the plugin path filled in, so commands are `/hamster-standup`, `/hamster-retro`, `/hamster-promote`, `/hamster-rules`, `/hamster-test`, `/hamster-lm`, `/handoff` (the marketplace forms are `/hamster:standup` … and `/hamster:handoff`). Rerun `./install.sh` after editing a command or skill.
+Requires `python3` and `git`; Navigator is optional (see above). Restart Claude Code. The installer copies commands and skills with the plugin path filled in, so commands are `/hamster-standup`, `/hamster-retro`, `/hamster-promote`, `/hamster-rules`, `/hamster-test`, `/hamster-lm`, `/handoff` (the marketplace forms are `/hamster:standup` … and `/hamster:handoff`). Rerun `./install.sh` after editing a command or skill.
 
 ## pi
 
