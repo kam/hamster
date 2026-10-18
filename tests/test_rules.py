@@ -102,6 +102,8 @@ def test_many_openers_finish_inside_the_hook_timeout():
     t = time.monotonic()
     _rules.blank_heredocs("x=$(cat <<EOF) " * 2000 + "\nrm -rf /\nEOF")
     _rules.blank_heredocs("cat > f <<EOF " + "(" * 4000 + ")" * 4000 + "\nEOF\nrm -rf /")
+    # deep `<(` nesting inside arithmetic: one linear pass (review r3)
+    _rules.blank_heredocs("echo $((" + "1<(" * 20000 + "1" + ")" * 20000 + ")) <<E\nx\nE\nrm -rf /")
     # just under the budget, so every opener is checked
     _rules.blank_heredocs("cat " + "<<E " * 400 + "\n" + "E\n" * 400 + "rm -rf /")
     assert time.monotonic() - t < 2

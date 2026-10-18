@@ -77,9 +77,9 @@ def _scan_line(text, ctx=None, low=None):
     and a `'` inside `"$(…)"` closes nothing it did not open. The third
     element, `joined`, says the line ended `x\\`: the shell glues the next
     line onto that word, so its column 0 is not a word start (`a\\` then
-    `#"` is the word `a#"`, not a comment). A plain paren's entry carries a
-    third element, so `_ctx_top` can look past it to the context it sits
-    in: `$((1+(cat <<EOF` is still arithmetic. `low`, a list `[start, depth]`,
+    `#"` is the word `a#"`, not a comment). A plain paren's entry carries,
+    third, the real context it sits in, so `_ctx_top` sees past it in one
+    step: `$((1+(cat <<EOF` is still arithmetic. `low`, a list `[start, depth]`,
     gets the least stack depth seen from offset `start` on, in the same pass."""
     state, stack, joined = ctx if ctx else (None, (), False)
     stack, escaped, word_start, i = list(stack), False, not joined, 0
@@ -123,10 +123,10 @@ def _scan_line(text, ctx=None, low=None):
             elif ch in "<>" and text.startswith("(", i + 1):
                 # `<(…)`, `>(…)`: a substitution, except in arithmetic (`1<(2)`)
                 top = _ctx_top(stack)
-                stack.append((None, ")", "(") if top and top[1] in ("))", "]", "}") else (None, ")"))
+                stack.append((None, ")", top) if top and top[1] in ("))", "]", "}") else (None, ")"))
                 i += 1
             elif ch == "(" and stack:
-                stack.append((None, ")", "("))  # a plain paren inside a substitution
+                stack.append((None, ")", _ctx_top(stack)))  # a plain paren inside a substitution
             elif closer == "))" and ch == ")" and not text.startswith("))", i):
                 stack[-1] = (stack[-1][0], ")")  # `$((echo a) | cat)`: bash fell back to `$( (…`
             elif closer and text.startswith(closer, i):
@@ -151,7 +151,8 @@ def _opener_hidden(prefix, ctx=None):
 
 def _ctx_top(stack):
     """The innermost `_scan_line` context that is not a plain paren."""
-    return next((e for e in reversed(stack) if len(e) == 2), None)
+    top = stack[-1] if stack else None
+    return top if top is None or len(top) == 2 else top[2]
 
 
 def _body_follows(line, end, ctx):
