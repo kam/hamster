@@ -72,6 +72,51 @@ def test_here_string_opens_no_heredoc(env, opener):
     assert r.returncode == 2
 
 
+@pytest.mark.parametrize("cmd", [
+    "true # <<EOF\nrm -rf /\nEOF",               # comment
+    "echo \"<<EOF \"\nrm -rf /\nEOF",            # double quotes
+    "echo '<<EOF'\nrm -rf /\nEOF",               # single quotes
+    "echo $((1<<2))\nrm -rf /\n2",               # arithmetic
+    "echo $((1 << 2))\nrm -rf /\n2",
+    "x=\"$(cat <<EOF)\"\nrm -rf /\nEOF",         # substitution closed on its line
+    "x=`cat <<EOF`\nrm -rf /\nEOF",
+    "cat <<F&`&\\\nx\nF&`&\\\nrm -rf /\nF",       # backtick opened after the opener
+    "echo \\<<EOF\nrm -rf /\nEOF",               # escaped `<`
+    "diff <(cat <<EOF) f\nrm -rf /\nEOF",         # process substitution
+    "tee >(cat <<EOF) f\nrm -rf /\nEOF",
+    "rm -rf /\necho " + "$(" * 60000 + " cat <<E\nbody\nE\n",  # deep line: decided, no crash (review r5)
+    "echo $((1+(cat <<EOF\n)))\nrm -rf /\nEOF",  # a plain paren inside arithmetic
+    "echo $((1<(cat <<EOF\n)))\nrm -rf /\nEOF",
+    "echo $(( (cat <<EOF\n)))\nrm -rf /\nEOF",
+    "echo $[1+(cat <<EOF\n)]\nrm -rf /\nEOF",
+    "echo ${x:-(cat <<EOF\n)}\nrm -rf /\nEOF",
+    "x=$(cat <<EOF) " * 2000 + "\nrm -rf /\nEOF",  # past the budget: nothing stripped
+])
+def test_opener_the_shell_does_not_see_hides_nothing(env, cmd):
+    """dev-lead review 2026-10-18: these `<<` open no heredoc, so the next line runs."""
+    assert guard("Bash", {"command": cmd}).returncode == 2
+
+
+def test_many_openers_finish_inside_the_hook_timeout():
+    import time
+    import _rules
+    t = time.monotonic()
+    _rules.blank_heredocs("x=$(cat <<EOF) " * 2000 + "\nrm -rf /\nEOF")
+    _rules.blank_heredocs("cat > f <<EOF " + "(" * 4000 + ")" * 4000 + "\nEOF\nrm -rf /")
+    # deep `<(` nesting inside arithmetic: one linear pass (review r3)
+    _rules.blank_heredocs("echo $((" + "1<(" * 20000 + "1" + ")" * 20000 + ")) <<E\nx\nE\nrm -rf /")
+    # just under the budget, so every opener is checked
+    _rules.blank_heredocs("cat " + "<<E " * 400 + "\n" + "E\n" * 400 + "rm -rf /")
+    assert time.monotonic() - t < 2
+
+
+def test_heredoc_after_a_quoted_apostrophe_still_strips(env):
+    r = guard("Bash", {"command": "echo \"it's\"; cat > f <<'EOF'\nnever run rm -rf /\nEOF"})
+    assert r.returncode == 0
+    r = guard("Bash", {"command": "x=\"$(cat <<'EOF'\nnever run rm -rf /\nEOF\n)\""})
+    assert r.returncode == 0
+
+
 def test_dash_heredoc_ends_at_an_indented_terminator(env):
     """`<<-` strips leading tabs: `\\tEOF` ends the body, so the next line runs (review r2)."""
     r = guard("Bash", {"command": "cat <<-EOF\nx\n\tEOF\nrm -rf /\nEOF"})
