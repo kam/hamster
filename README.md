@@ -10,6 +10,8 @@ run ──► fail ──► capture ──► retro ──► lesson ──► 
 
 The premise: a lesson that lives as prose gets forgotten. A lesson that lives as a hook does not. Every rule needs a test that shows it blocks the bad shape and passes the good one; a blocking rule without both runs warn-only. User and project rules that never fire for 60 days are listed for deletion; bundled rules and rules marked `keep: true` are exempt — a hard-safety rule that never fires is doing its job.
 
+The guide behind it, with my own fire counts and when to block versus rewrite: [Turning Claude Code mistakes into hook rules that stay tested](https://khamsouk.souvanlasy.com/guides/claude-code-hook-rules-from-mistakes/).
+
 ## What you get
 
 | Piece | Event | Does |
