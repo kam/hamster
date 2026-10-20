@@ -84,14 +84,16 @@ def test_wake_disabled_and_bad_input_fail_open(env, monkeypatch):
     assert bad.returncode == 0
 
 
-def test_stale_blocks_cold_chat_once(env):
+def test_stale_warns_cold_chat_without_blocking(env):
     main = env / "chat.jsonl"
     transcript(main, 210000, 185, model="claude-fable-5-1")
     payload = {"session_id": "s2", "transcript_path": str(main), "prompt": "carry on"}
     first = run(STALE, payload)
-    assert first.returncode == 2
-    assert "3h05m" in first.stderr and "210k" in first.stderr and "/clear" in first.stderr
-    assert run(STALE, payload).returncode == 0
+    assert first.returncode == 0 and first.stderr == ""
+    out = json.loads(first.stdout)
+    assert "3h05m" in out["systemMessage"] and "210k" in out["systemMessage"] and "/clear" in out["systemMessage"]
+    assert out["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+    assert json.loads(run(STALE, payload).stdout)["systemMessage"]  # priced every time, never blocked
 
 
 @pytest.mark.parametrize(
@@ -102,7 +104,8 @@ def test_stale_passes(env, tokens, minutes, prompt):
     main = env / "chat.jsonl"
     transcript(main, tokens, minutes)
     payload = {"session_id": "s3", "transcript_path": str(main), "prompt": prompt}
-    assert run(STALE, payload).returncode == 0
+    r = run(STALE, payload)
+    assert r.returncode == 0 and r.stdout == ""
 
 
 def test_last_call_reads_past_a_huge_trailing_line(env):
