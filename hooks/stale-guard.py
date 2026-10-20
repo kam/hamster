@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""UserPromptSubmit hook: say what a cold chat costs before it is paid.
+"""UserPromptSubmit hook: say what a cold chat cost, without stopping it.
 
 The main session's prompt cache lives ~1 hour. The first prompt after a longer
 gap re-writes the whole context at cache-write price (measured 2026-09: 64
-such resumes, ~$77). First prompt → exit 2: the user sees the cost and the
-choice (/clear for new work, or send again to continue). The next prompt
-within 10 minutes passes. Slash commands always pass.
+such resumes, ~$77). Until 0.8.4 the hook blocked that prompt once (exit 2)
+and asked the user to resend; the cost was already committed by then, so the
+block only added a resend. Now it exits 0 with a `systemMessage` the user sees
+and an `additionalContext` note for the model. Slash commands always pass.
 Fails open. HAMSTER_STALE_GUARD=0 disables; HAMSTER_STALE_IDLE_S and
 HAMSTER_STALE_MIN_TOKENS tune the thresholds.
 """
@@ -14,7 +15,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _cache import cold, confirmed  # noqa: E402
+from _cache import cold  # noqa: E402
 from _common import env_int  # noqa: E402
 
 
@@ -28,18 +29,17 @@ def main():
     hit = cold(
         path, env_int("HAMSTER_STALE_IDLE_S", 3600), env_int("HAMSTER_STALE_MIN_TOKENS", 100000)
     )
-    if not hit or confirmed("stale-guard.json", str(data.get("session_id"))):
+    if not hit:
         return
     tokens, minutes, dollars = hit
     idle = f"{minutes // 60}h{minutes % 60:02d}m" if minutes >= 60 else f"{minutes} min"
-    print(
-        f"hamster [stale-guard]: this chat sat idle {idle} holding {tokens // 1000}k tokens. "
-        f"Its cache is cold, so your next message pays ~${dollars:.2f} just to load it again.\n"
-        f"  New topic?   /clear first (a handoff reloads by itself).\n"
-        f"  Continuing?  Press up-arrow and send again; it will pass.",
-        file=sys.stderr,
+    note = (
+        f"hamster [stale-guard]: this chat sat idle {idle} holding {tokens // 1000}k tokens; "
+        f"its cache was cold, so this message pays ~${dollars:.2f} to reload it. "
+        f"New topic? /handoff then /clear is cheaper than carrying this context."
     )
-    sys.exit(2)
+    print(json.dumps({"systemMessage": note, "hookSpecificOutput": {
+        "hookEventName": "UserPromptSubmit", "additionalContext": note}}))
 
 
 if __name__ == "__main__":
