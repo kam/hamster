@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""PreToolUse hook on SendMessage: stop the lead waking an idle agent.
+"""PreToolUse hook on SendMessage: price the wake of an idle agent, without blocking.
 
 A sub-agent's prompt cache lives ~5 minutes. A message to one that has sat
 longer re-writes its whole context at cache-write price before it reads a
 word (measured 2026-09: 73 of 81 sub-agent cold rewrites followed an incoming
-message). First attempt → exit 2 with the cost and the cheaper move (fresh
-spawn with a short brief). The same send repeated within 10 minutes passes, so
-an agent holding state that cannot be re-briefed is still reachable.
+message). Until 0.8.4 the hook blocked the first send and let the repeat
+through; in practice every blocked send was a round-2 brief to a reviewer or
+implementer that only that agent could take (94 blocks in 10 days, 2026-10),
+so the block bought a resend, not a saving. Now it exits 0 with a
+`systemMessage` the user sees and an `additionalContext` note for the model.
 Fails open. HAMSTER_WAKE_GUARD=0 disables; HAMSTER_WAKE_IDLE_S and
 HAMSTER_WAKE_MIN_TOKENS tune the thresholds.
 """
@@ -16,7 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _cache import cold, confirmed  # noqa: E402
+from _cache import cold  # noqa: E402
 from _common import env_int  # noqa: E402
 
 
@@ -58,18 +60,17 @@ def main():
     hit = cold(
         log, env_int("HAMSTER_WAKE_IDLE_S", 300), env_int("HAMSTER_WAKE_MIN_TOKENS", 60000)
     )
-    if not hit or confirmed("wake-guard.json", f"{data.get('session_id')}:{to}"):
+    if not hit:
         return
     tokens, minutes, dollars = hit
-    print(
-        f"hamster blocked [wake-guard]: agent '{to}' has been idle {minutes} min holding "
+    note = (
+        f"hamster [wake-guard]: agent '{to}' has been idle {minutes} min holding "
         f"{tokens // 1000}k tokens; its cache is cold, so this message re-writes all of it "
-        f"(~${dollars:.2f}) before the agent reads a word. Spawn a fresh agent with a short "
-        f"brief (paste the prior report's conclusions) instead. If only this agent can do it, "
-        f"send the same message again within 10 minutes and it will pass.",
-        file=sys.stderr,
+        f"(~${dollars:.2f}) before the agent reads a word. A fresh agent with a short brief "
+        f"is cheaper unless this one holds state that cannot be re-briefed."
     )
-    sys.exit(2)
+    print(json.dumps({"systemMessage": note, "hookSpecificOutput": {
+        "hookEventName": "PreToolUse", "additionalContext": note}}))
 
 
 if __name__ == "__main__":
