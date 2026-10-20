@@ -45,13 +45,14 @@ def session(tmp, name, tokens, minutes_ago):
     return {"session_id": "s1", "transcript_path": str(main), "tool_name": "SendMessage"}
 
 
-def test_wake_blocks_idle_agent_once_then_passes(env):
+def test_wake_warns_idle_agent_without_blocking(env):
     payload = session(env, "t9-impl", 200000, 30) | {"tool_input": {"to": "t9-impl", "message": "x"}}
     first = run(WAKE, payload)
-    assert first.returncode == 2
-    assert "idle 30 min" in first.stderr and "200k" in first.stderr and "$1.25" in first.stderr
-    assert run(WAKE, payload).returncode == 0  # the repeat is the confirmation
-    assert run(WAKE, payload).returncode == 2  # and it is spent
+    assert first.returncode == 0 and first.stderr == ""
+    out = json.loads(first.stdout)
+    assert "idle 30 min" in out["systemMessage"] and "200k" in out["systemMessage"] and "$1.25" in out["systemMessage"]
+    assert out["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+    assert json.loads(run(WAKE, payload).stdout)["systemMessage"]  # priced every time, never blocked
 
 
 @pytest.mark.parametrize(
@@ -65,20 +66,22 @@ def test_wake_blocks_idle_agent_once_then_passes(env):
 )
 def test_wake_passes(env, tokens, minutes, to):
     payload = session(env, "t9-impl", tokens, minutes) | {"tool_input": {"to": to}}
-    assert run(WAKE, payload).returncode == 0
+    r = run(WAKE, payload)
+    assert r.returncode == 0 and r.stdout == ""
 
 
 def test_wake_matches_agent_id_and_sender_inside_subagent(env):
     payload = session(env, "t9-impl", 200000, 30)
     payload["transcript_path"] = str(env / "sess" / "subagents" / "agent-aother-1.jsonl")
     payload["tool_input"] = {"to": "at9-impl-abc123"}
-    assert run(WAKE, payload).returncode == 2
+    assert "wake-guard" in json.loads(run(WAKE, payload).stdout)["systemMessage"]
 
 
 def test_wake_disabled_and_bad_input_fail_open(env, monkeypatch):
     payload = session(env, "t9-impl", 200000, 30) | {"tool_input": {"to": "t9-impl"}}
     monkeypatch.setenv("HAMSTER_WAKE_GUARD", "0")
-    assert run(WAKE, payload).returncode == 0
+    r = run(WAKE, payload)
+    assert r.returncode == 0 and r.stdout == ""
     monkeypatch.delenv("HAMSTER_WAKE_GUARD")
     bad = subprocess.run([sys.executable, str(WAKE)], input="not json", capture_output=True, text=True)
     assert bad.returncode == 0
