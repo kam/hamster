@@ -2,7 +2,7 @@
   "id": "rm-rf-root-or-home",
   "tool": "Bash",
   "field": "command",
-  "pattern": "(^|[;&|(]\\s*|\\s)rm\\s+(-[a-zA-Z]*\\s+)*(-[a-zA-Z]*[rR][a-zA-Z]*[fF][a-zA-Z]*|-[a-zA-Z]*[fF][a-zA-Z]*[rR][a-zA-Z]*|--recursive\\s+--force|--force\\s+--recursive)\\s+(\\S+\\s+)*[\"']?(/\\*?|(~|\\$HOME|\\$\\{HOME\\})[\"']?(/\\*?)?|\\.\\.?)[\"']?(\\s|$|;|&|\\|)",
+  "pattern": "(^|[;&|(]\\s*|\\s)rm\\s+(-[a-zA-Z]*\\s+)*(-[a-zA-Z]*[rR][a-zA-Z]*[fF][a-zA-Z]*|-[a-zA-Z]*[fF][a-zA-Z]*[rR][a-zA-Z]*|--recursive\\s+--force|--force\\s+--recursive)\\s+([^\\s;&|]+[^\\S\\n]+)*[\"']?(/\\*?|(~|\\$HOME|\\$\\{HOME\\})[\"']?(/\\*?)?|\\.\\.?)[\"']?(\\s|$|;|&|\\|)",
   "action": "block",
   "message": "Recursive force-delete of /, ~, $HOME, . or .. is never what you want. Name the exact directory.",
   "source": "bundled",
@@ -25,6 +25,15 @@
     {"input": "rm -rf ~/.cache/foo", "expect": "pass"},
     {"input": "rm -rf \"$HOME/tmp\"", "expect": "pass"},
     {"input": "rm -rf /tmp/scratch", "expect": "pass"},
-    {"input": "rm -r notes.txt", "expect": "pass"}
+    {"input": "rm -r notes.txt", "expect": "pass"},
+    {"input": "rm -rf /tmp/live && mkdir /tmp/live && du -sh .", "expect": "pass"},
+    {"input": "T=/tmp/aw; rm -rf $T; grep -rl foo .", "expect": "pass"},
+    {"input": "rm -rf /tmp/a && rm -rf /", "expect": "block"},
+    {"input": "rm -rf /tmp/a; rm -rf ~", "expect": "block"},
+    {"input": "rm -rf /tmp/x\ndu -sh .", "expect": "pass"},
+    {"input": "rm -rf /tmp/x\nrm -rf /", "expect": "block"}
+  ],
+  "history": [
+    "2026-10-20: the operand scan stops at ;&| and newline — `rm -rf /tmp/x && du -sh .` blocked on the `.` two commands later (6 of 7 blocks in October were this shape)"
   ]
 }
