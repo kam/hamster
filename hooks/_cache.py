@@ -1,4 +1,5 @@
 """Prompt-cache cost helpers shared by wake-guard and stale-guard. Stdlib only.
+The block-once memory `confirmed()` left with the blocks in 0.8.4.
 
 A transcript's last assistant `usage` says how many tokens the next call will
 carry; its timestamp says whether the cache that held them is still warm. Every
@@ -8,11 +9,6 @@ helper fails soft: unreadable input yields None, never an exception.
 import datetime as dt
 import json
 import os
-import time
-
-from _common import state_dir
-
-RETRY_WINDOW_S = 600
 
 # $/M 5-minute cache-write tokens, list price. First substring match wins.
 WRITE_PRICE = {"fable": 12.5, "opus-5-5": 5.0, "opus": 6.25, "sonnet": 2.5,
@@ -66,28 +62,6 @@ def last_call(path):
         if window >= size:
             break
     return None
-
-
-def confirmed(store, key):
-    """Block-once memory. True when `key` was blocked within the retry window
-    (the repeat is the confirmation); records the block otherwise."""
-    path = state_dir(store)
-    now = time.time()
-    try:
-        seen = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        seen = {}
-    seen = {k: v for k, v in seen.items() if now - v < 86400}
-    ok = now - seen.get(key, 0) < RETRY_WINDOW_S
-    if ok:
-        seen.pop(key, None)
-    else:
-        seen[key] = now
-    try:
-        path.write_text(json.dumps(seen), encoding="utf-8")
-    except OSError:
-        return True  # cannot remember the block → never block twice
-    return ok
 
 
 def cold(path, idle_seconds, min_tokens):
