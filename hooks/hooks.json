@@ -88,6 +88,12 @@
           },
           {
             "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/session-recap.py",
+            "timeout": 5,
+            "statusMessage": "Recapping last session"
+          },
+          {
+            "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/decisions-load.py",
             "timeout": 10,
             "statusMessage": "Loading decisions"

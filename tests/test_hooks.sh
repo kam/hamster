@@ -94,6 +94,59 @@ check "offset-aware stamps compare as instants" 'TZ=Asia/Tokyo load | grep -q "^
 rm .claude/handoffs/*.md
 HANDOFF_LOAD_CAP= load; check "bad env fails open" '[ $? -eq 0 ]'
 
+echo "# session recap"
+RECAP="python3 $HOOKS/session-recap.py"
+P="$T/proj"; mkdir -p "$P"
+cat > "$P/prev.jsonl" <<J
+{"type":"user","cwd":"$T","gitBranch":"feature/demo","timestamp":"2026-01-01T09:00:00Z","message":{"role":"user","content":"<command-name>/clear</command-name>"}}
+{"type":"user","cwd":"$T","gitBranch":"feature/demo","timestamp":"2026-01-01T09:01:00Z","message":{"role":"user","content":"add csv export; token sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789"}}
+{"type":"user","cwd":"$T","timestamp":"2026-01-01T09:02:00Z","message":{"role":"user","content":"<command-message>dev-lead:next-task</command-message>\n<command-name>/dev-lead:next-task</command-name>\n<command-args>T-4</command-args>"}}
+{"type":"user","cwd":"$T","timestamp":"2026-01-01T09:03:00Z","message":{"role":"user","content":"<bash-input>make test</bash-input>"}}
+{"type":"user","cwd":"$T","timestamp":"2026-01-01T09:03:01Z","message":{"role":"user","content":"<bash-stdout>ok</bash-stdout><bash-stderr></bash-stderr>"}}
+{"type":"user","cwd":"$T","isCompactSummary":true,"isVisibleInTranscriptOnly":true,"timestamp":"2026-01-01T09:03:10Z","message":{"role":"user","content":"This session is being continued from a previous conversation COMPACT-SUMMARY"}}
+{"type":"user","cwd":"$T","timestamp":"2026-01-01T09:03:20Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}
+{"type":"user","cwd":"$T","timestamp":"2026-01-01T09:03:30Z","message":{"role":"user","content":"<command-name>/model</command-name>\n<command-args>opus</command-args>"}}
+{"type":"user","cwd":"$T","timestamp":"2026-01-01T09:03:40Z","message":{"role":"user","content":"see <command-name>/literal</command-name> in the fixture"}}
+{"type":"user","cwd":"$T","isSidechain":true,"timestamp":"2026-01-01T09:03:50Z","message":{"role":"user","content":"SIDECHAIN-PROMPT"}}
+{"type":"assistant","cwd":"$T","timestamp":"2026-01-01T09:04:00Z","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"$T/app/export.rb"}}]}}
+{"type":"assistant","cwd":"$T","timestamp":"2026-01-01T09:05:00Z","message":{"role":"assistant","content":[{"type":"text","text":"CSV export shipped behind a flag."}]}}
+J
+printf '%s\n' '{"type":"user","cwd":"'"$T"'","message":{"role":"user","content":"CURRENT-SESSION"}}' > "$P/cur.jsonl"
+printf '%s\n' '{"type":"user","cwd":"/elsewhere","message":{"role":"user","content":"OTHER-REPO"}}' > "$P/other.jsonl"
+printf '%s\n' '{"type":"user","cwd":"'"$T"'","entrypoint":"cli","message":{"role":"user","content":"<command-name>/clear</command-name>"}}' > "$P/empty.jsonl"
+printf '%s\n' '{"type":"user","cwd":"'"$T"'","entrypoint":"sdk-cli","message":{"role":"user","content":"HEADLESS-RUN"}}' > "$P/sdk.jsonl"
+touch -t 202601010900 "$P/prev.jsonl"; touch -t 202601011000 "$P/other.jsonl" "$P/cur.jsonl" "$P/empty.jsonl" "$P/sdk.jsonl"
+echo w >> a.txt; git add a.txt
+GIT_COMMITTER_DATE=2026-01-01T09:02:30Z GIT_AUTHOR_DATE=2026-01-01T09:02:30Z git commit -qm IN-WINDOW
+echo x >> a.txt; git add a.txt
+GIT_COMMITTER_DATE=2026-01-01T12:00:00Z GIT_AUTHOR_DATE=2026-01-01T12:00:00Z git commit -qm OUT-WINDOW
+recap(){ echo "{\"cwd\":\"$T\",\"source\":\"$1\",\"session_id\":\"cur\",\"transcript_path\":\"$P/cur.jsonl\"}" | $RECAP; }
+OUT=$(recap clear); MSG=$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["systemMessage"])' <<<"$OUT" 2>/dev/null)
+check "clear: valid JSON with systemMessage" '[ -n "$MSG" ]'
+check "clear: context carries banner + recap" 'python3 -c "import json,sys; c=json.loads(sys.stdin.read())[\"hookSpecificOutput\"][\"additionalContext\"]; sys.exit(0 if \"not instructions\" in c and \"csv export\" in c else 1)" <<<"$OUT"'
+check "recap lists plain prompt" 'grep -q "add csv export" <<<"$MSG"'
+check "recap lists slash command with args" 'grep -q "/dev-lead:next-task T-4" <<<"$MSG"'
+check "recap shows ! command, drops bash output and /clear" 'grep -q "! make test" <<<"$MSG" && ! grep -qE "bash-stdout|/clear" <<<"$MSG"'
+check "recap lists edited file relative to repo" 'grep -q "Edited (1): app/export.rb" <<<"$MSG"'
+check "recap shows last reply" 'grep -q "Ended with: CSV export shipped" <<<"$MSG"'
+check "recap counts 4 prompts on feature/demo" 'grep -q "feature/demo .* 4 prompt(s)" <<<"$MSG"'
+check "compaction summary, interrupt, /model, sidechain dropped" '! grep -qE "COMPACT-SUMMARY|Request interrupted|/model|SIDECHAIN" <<<"$MSG"'
+check "literal <command-name> inside a prompt stays a prompt" 'grep -q "see <command-name>/literal" <<<"$MSG"'
+check "empty and headless sessions skipped for the next one" '! grep -q HEADLESS <<<"$OUT" && grep -q "previous session prev" <<<"$MSG"'
+check "commit inside the window listed, outside not" 'grep -q IN-WINDOW <<<"$MSG" && ! grep -q OUT-WINDOW <<<"$MSG"'
+TZMSG=$(echo "{\"cwd\":\"$T\",\"source\":\"clear\",\"session_id\":\"cur\",\"transcript_path\":\"$P/cur.jsonl\"}" | TZ=Pacific/Auckland $RECAP)
+check "commit window holds in another time zone" 'grep -q IN-WINDOW <<<"$TZMSG" && ! grep -q OUT-WINDOW <<<"$TZMSG"'
+check "recap redacts secrets" '! grep -q "sk-ant" <<<"$OUT"'
+check "current session and other-repo session excluded" '! grep -qE "CURRENT-SESSION|OTHER-REPO" <<<"$OUT"'
+check "startup within age shows recap" '[ -n "$(HAMSTER_RECAP_MAX_AGE_HOURS=999999 recap startup)" ]'
+check "startup past max age is silent" '[ -z "$(HAMSTER_RECAP_MAX_AGE_HOURS=1 recap startup)" ]'
+check "resume and compact are silent" '[ -z "$(recap resume)$(recap compact)" ]'
+check "HAMSTER_RECAP=0 is silent" '[ -z "$(HAMSTER_RECAP=0 recap clear)" ]'
+NOPATH=$(echo '{"cwd":"'"$T"'","source":"clear","transcript_path":""}' | $RECAP)
+check "no transcript_path (pi bridge) is silent" '[ -z "$NOPATH" ]'
+check "garbage stdin fails open" 'echo nope | $RECAP; [ $? -eq 0 ]'
+rm -rf "$P"
+
 echo "# git edge cases"
 git checkout -q --detach; pre auto; OUT=$(load compact)
 check "detached HEAD round-trips" 'grep -q "detached@" <<<"$OUT" && grep -q "auto-snapshot" <<<"$OUT"'
