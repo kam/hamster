@@ -180,7 +180,10 @@ def test_guard_allows_valid_rows(repo):
         repo,
         "| DEC-1 | 2026-10-01 | Paddle | w | r | Kam | chat | - | superseded by DEC-2 |\n"
         "| DEC-2 | 2026-10-13 | Stripe | w | r | Jane Smith (client) | email | s | decided |\n"
-        "| DEC-3 | 2026-10-14 | Drop blog | w | r |  | chat | - | proposed |\n",
+        "| DEC-3 | 2026-10-14 | Drop blog | w | r |  | chat | - | proposed |\n"
+        "| DEC-4 | 2026-11-02 | Spec | w | r | Kam | ExitPlanMode (spec approval) | - | decided |\n"
+        "| DEC-5 | 2026-11-05 | Art | w | r | Kam | choice-board (passkey) | - | decided |\n"
+        "| DEC-6 | 2026-11-05 | Fwd | w | r | Kam | email (forwarded) | - | decided |\n",
     )
     assert code == 0, err
 
@@ -189,6 +192,8 @@ def test_guard_allows_valid_rows(repo):
     ("| DEC-1 | 13/10/2026 | x | w | r | Kam | chat | - | decided |", "YYYY-MM-DD"),
     ("| D1 | 2026-10-13 | x | w | r | Kam | chat | - | decided |", "not DEC-"),
     ("| DEC-1 | 2026-10-13 | x | w | r | Kam | carrier pigeon | - | decided |", "Channel"),
+    ("| DEC-1 | 2026-10-13 | x | w | r | Kam | (chat) | - | decided |", "Channel"),
+    ("| DEC-1 | 2026-10-13 | x | w | r | Kam | pigeon (chat) | - | decided |", "Channel"),
     ("| DEC-1 | 2026-10-13 | x | w | r | Kam | chat | - | approved |", "Status"),
     ("| DEC-1 | 2026-10-13 | x | w | r | Kam | chat | - | superseded by DEC-9 |", "no row has"),
     ("| DEC-1 | 2026-10-13 | x | w | r | Kam | chat | - | superseded by DEC-1 |", "itself"),

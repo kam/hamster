@@ -58,8 +58,10 @@ HEREDOC_RE = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?[^\n]*\n(.*?)\n\s*\1\b", re.S)
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 CHANNELS = {
     "chat", "askuserquestion", "email", "meeting", "call", "slack", "teams", "sms",
-    "whatsapp", "signed", "workshop", "ticket", "pr review",
+    "whatsapp", "signed", "workshop", "ticket", "pr review", "exitplanmode", "choice-board",
 }
+# A trailing qualifier names the instance, not the channel: `ExitPlanMode (spec approval)`.
+CHANNEL_QUALIFIER_RE = re.compile(r"\s*\([^()]*\)\s*$")
 PLACEHOLDER_RE = re.compile(
     r"^\s*(\[.*\]|<.*>|tbd|todo|n/?a|name|who|pending|unknown|-+|\?+)\s*$", re.I
 )
@@ -152,7 +154,7 @@ def check(text, other):
                     f"{where}: decided row needs a named person in Decided by, got "
                     f"`{r['Decided by']}`"
                 )
-            if r["Channel"].strip().lower() not in CHANNELS:
+            if CHANNEL_QUALIFIER_RE.sub("", r["Channel"]).strip().lower() not in CHANNELS:
                 problems.append(
                     f"{where}: Channel `{r['Channel']}` — one of {', '.join(sorted(CHANNELS))}"
                 )
