@@ -34,7 +34,7 @@ the standing `decided` rows at session start; `decision-guard.py` refuses a malf
 - **Decision** one line, stated as the rule the next session follows: "Checkout uses Stripe, not Paddle." Under 140 characters — the loader clips there.
 - **Why** the reason in the decider's words where they gave one. **Rejected** the options ruled out, so no session re-suggests them.
 - **Decided by** a named person ("Kam", "Jane Smith (client)"). Never an agent, "the client" or "we".
-- **Channel** `chat`, `AskUserQuestion`, `email`, `meeting`, `call`, `slack`, `teams`, `sms`, `whatsapp`, `signed`, `workshop`, `ticket` or `PR review`.
+- **Channel** `chat`, `AskUserQuestion`, `email`, `meeting`, `call`, `slack`, `teams`, `sms`, `whatsapp`, `signed`, `workshop`, `ticket`, `PR review`, `ExitPlanMode` or `choice-board`, optionally qualified: `ExitPlanMode (spec approval)`.
 - **Source** for a saved paste: `` `<path>` sha:<12> `` plus at most two quoted lines, e.g. `` `.claude/decisions/sources/2026-10-14-email-3f2a…txt` sha:3f2a9c1b7d4e "Go with Stripe." ``. For chat: the session date. Escape a literal `|` as `\|`.
 - **Status** `proposed`, `decided` or `superseded by DEC-<n>`.
 
