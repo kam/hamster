@@ -11,7 +11,7 @@ import json
 import os
 
 # $/M 5-minute cache-write tokens, list price. First substring match wins.
-WRITE_PRICE = {"fable": 12.5, "opus-5-5": 5.0, "opus": 6.25, "sonnet": 2.5,
+WRITE_PRICE = {"fable-5-2": 10.0, "fable": 12.5, "opus-5-5": 5.0, "opus": 6.25, "sonnet": 2.5,
                "haiku-5-5": 0.125, "haiku": 1.25}
 # Haiku 5.5 bills a prompt over 100k tokens at 5x (cache write $0.625/M).
 TIERED = {"haiku-5-5": (100_000, 0.625)}
