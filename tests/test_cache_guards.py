@@ -126,6 +126,7 @@ def test_last_call_reads_past_a_huge_trailing_line(env):
     ("claude-opus-5-5", 5.0),
     ("claude-opus-5", 6.25),
     ("claude-fable-5-1", 12.5),
+    ("claude-fable-5-2", 10.0),
     ("claude-haiku-5-5", 0.125),
     ("claude-haiku-4-5", 1.25),
     ("", 6.25),
